@@ -1,6 +1,6 @@
 ; **************************************************************************************************************************************
 ;
-; TPLASC version 0.26 Dion Methorst & Ed Nieuwenhuys, Sanquin Amsterdam, May 2015.
+; TPLASC version 0.27 Dion Methorst & Ed Nieuwenhuys, Sanquin Amsterdam, May 2015.
 ; concatenates your Tecan EVO TPL and ASC files for direct use in LIMS database
 ;
 ; **************************************************************************************************************************************
@@ -57,7 +57,12 @@
 ; V0.24		added ini file section for easy adaptation of filepaths (builtin reset to default upon deletion)
 ; V0.25		fixed failure extracting correct logfiles from trace.txt in Tecan audittrail
 ;			added errorlogging for headerline in custom TPL-files
+; June 2015
 ; V0.26		added toggle for Zip function in ini-file
+; V0.27		disabled readonly property of TrayID.TPL file Zipfunction: FileSetAttrib($TPLPath & $TrayID & ".tpl", "-R+A", 1)
+; 			better sorting of $ASC array
+;
+;
 ;
 ; ToDo (?) 	- improve: send_and_log & clear logfile function
 ;
@@ -274,9 +279,9 @@ $Header = ""
 
 		 _ArrayDelete($aASC, $aASC[0])											;ASC array adjusted to read in loop
 		 _ArrayDelete($aASC, 0)
-
-		 _ArraySort($aTPL, 0, 0, 0, 0)											; array is sorted alphabetically
-		 _ArraySort($aASC, 0, 0, 1, 0)
+;_ArrayDisplay($aASC)
+		 _ArraySort($aTPL, 0, 0, 0, 0, 1)											; array is sorted alphabetically
+		 _ArraySort($aASC, 0, 0, 0, 0, 1)
 
 ;_ArrayDisplay($aTPL)
 ;_ArrayDisplay($aASC)
@@ -352,6 +357,15 @@ Func _ZipToArchive(Byref $TrayID);ByRef $ArchPath, ByRef $TPLPath,
 If not fileexists($ArchPath & "TPLzip.zip") then _Zip_Create($ArchPath & "TPLzip.zip",0)
 If not fileexists($ArchPath & "ASCzip.zip") then _Zip_Create($ArchPath & "ASCzip.zip",0)
 
+FileSetAttrib($TPLPath & $TrayID & ".tpl", "-R+A", 1)
+If Not FileSetAttrib($TPLPath & $TrayID & ".tpl", "-R+A", 1) Then
+        MsgBox($MB_SYSTEMMODAL, "Error", "Problem setting TPL-fie attributes.",3)
+    EndIf
+FileSetAttrib($ASCPath & $TrayID & ".asc", "-R+A", 1)
+If Not FileSetAttrib($ASCPath & $TrayID & ".asc", "-R+A", 1) Then
+        MsgBox($MB_SYSTEMMODAL, "Error", "Problem setting ASC-file attributes.",3)
+    EndIf
+
 _Zip_AddItem($ArchPath & "TPLzip.zip", $TPLPath & $TrayID & ".tpl" , ""  , 21)
 _Zip_AddItem($ArchPath & "ASCzip.zip" , $ASCPath & $TrayID & ".asc" ,  "" , 21)
 
@@ -403,7 +417,7 @@ Next
 
 _ArraySort($aASCsearch2D,1,1,"",1)
 _FileReadToArray($ASCPath & $aASCsearch2D[1][0], $aASC)
-
+;_ArrayDisplay($aASC)
 ; Retrieve TrayID = ASC filename
 $TrayID = stringtrimright($aASCsearch2D[1][0],4)
 	  If @error = -1 then
