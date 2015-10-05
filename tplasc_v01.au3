@@ -1,6 +1,6 @@
 ; **************************************************************************************************************************************
 ;
-; TPLASC version 0.16 Dion Methorst & Ed Nieuwenhuys, Sanquin IPB IMMC/CAP, August 2013.
+; TPLASC version 0.17 Dion Methorst & Ed Nieuwenhuys, Sanquin IPB IMMC/CAP, September 2014.
 ; concatenates your Tecan EVO TPL and ASCII files for direct use in LIMS database
 ;
 ; **************************************************************************************************************************************
@@ -126,7 +126,6 @@ local $ASCLine								; the ASCII file line number
 ;local $Logdata								; _SendAndLog($Logdata, $Filename = -1, $TimeStamp = False)
 ;local $TimeStamp							; _SendAndLog($Logdata, $Filename = -1, $TimeStamp = False)
 ;local $hFile								; _SendAndLog($Logdata, $Filename = -1, $TimeStamp = False)
-
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 Func _Main()
@@ -169,7 +168,7 @@ For $i=1 to $aTPLsearch[0]
 Next
 
 _ArraySort($aTPLsearch2D,1,1,"",1)
-_ArrayDisplay($aTPLsearch2D)
+;_ArrayDisplay($aTPLsearch2D)
 _FileReadToArray($TPLPath & $aTPLsearch2D[1][0], $aTPL)
 
 ; change 'D' to 'R' in $aTPL array
@@ -214,9 +213,9 @@ For $i=1 to $aASCsearch[0]
 Next
 
 _ArraySort($aASCsearch2D,1,1,"",1)
-_ArrayDisplay($aASCsearch2D)
+;_ArrayDisplay($aASCsearch2D)
 _FileReadToArray($ASCPath & $aASCsearch2D[1][0], $aASC)
-_ArrayDisplay($aASC)
+;_ArrayDisplay($aASC)
 
 EndFunc
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -257,10 +256,17 @@ Global $TPLASC = fileopen($TPLASCPath & $TrayID & ".evo", 2 +8)
 ;									T; TrayID
 ;									A; Evo magellan.mth
 
-FileWriteline($TPLASC, $aTPL[1] & ";" & $TrayID & ";MagellanMethod;" & $aASC[$aASC[0]] & ";" & "_checksum" &  @CRLF)
-FileWriteline($TPLASC, "U;Username; Not Implemented SEP2014, soon to be retrieved from EVOware logfiles..." & ";" & "_checksum" &  @CRLF)
-FileWriteline($TPLASC, "T;" & $TrayID & ";" & "_checksum"&  @CRLF)
-FileWriteline($TPLASC, "A;MagellanMethod;" & $aASC[$aASC[0]] & ";" & "_checksum"& @CRLF)
+
+; header array? + checksum header array function
+Local $header
+$Header = $aTPL[1] & ";"
+FileWriteline($TPLASC, $aTPL[1] & ";" & _HFecksum($Header) &  @CRLF)
+$Header = "U;Username; Not Implemented SEP2014, soon to be retrieved from EVOware logfiles...;"
+FileWriteline($TPLASC, "U;Username; Not Implemented SEP2014, soon to be retrieved from EVOware logfiles..." & ";" & _HFecksum($Header) &  @CRLF)
+$Header = "T;" & $TrayID & ";"
+FileWriteline($TPLASC, "T;" & $TrayID & ";" & _HFecksum($Header) &  @CRLF)
+$Header = "A;MagellanMethod;" & $aASC[$aASC[0]] & ";"
+FileWriteline($TPLASC, "A;MagellanMethod;" & $aASC[$aASC[0]] & ";" & _HFecksum($Header) & @CRLF)
 
 ; H;18-07-13;09:54:24;MBL110;MagellanMethod;MBL_EVO28211.mth
 ; write header with H;date;time;EVO;machine ;[$aASC[0]]is the number of lines in the array; here used to read data ;from the last line of the array i.e. :  $ASC[$aASC[0]
@@ -275,8 +281,8 @@ FileWriteline($TPLASC, "A;MagellanMethod;" & $aASC[$aASC[0]] & ";" & "_checksum"
 		 _ArraySort($aTPL, 0, 0, 0, 0)											; array is sorted alphabetically
 		 _ArraySort($aASC, 0, 0, 1, 0)
 
-		 _ArrayDisplay($aTPL)													; display the resulting array after deletion of the 1st and last lines
-		 _ArrayDisplay($aASC)
+;		 _ArrayDisplay($aTPL)													; display the resulting array after deletion of the 1st and last lines
+;		 _ArrayDisplay($aASC)
 
 		 If $LOGFILE = 1 Then _SendAndLog("filename extracted from ASCII file: " & $TrayID, $Logname, True)	; write TrayID/ASCII filename to logfile
 
@@ -296,10 +302,11 @@ for $ASCLine = 0 to ubound($aASC)-1
 	  $ASCwrite = StringStripWS($aASC[$ASCLine],1)
 
 
+
 	  Select
 		 Case $aASCSample = $TPLSample											; determines whether the ASC samplename is the same as the TPL samplename and if so,
 
-			FileWriteline($TPLASC, StringStripWS($aTPL[$TPLine],2) & StringStripWS($aASC[$ASCLine],1) & "_checksum" & @CRLF) ; write the matching TPL and ASCii data to the TPLASC file
+			FileWriteline($TPLASC, $TPLwrite & $ASCwrite & _Checksum($TPLwrite, $ASCwrite) & @CRLF) ; write the matching TPL and ASCii data to the TPLASC file
 
 		 Case $aASCSample <> $TPLSample											; if samplenames are not exactly the same a message pops up: check the line numbers int he ASC and tPL files
 
@@ -311,9 +318,12 @@ for $ASCLine = 0 to ubound($aASC)-1
 
 next
 
-FileWriteline($TPLASC, "F; Evoware Logfile names and location will be written here;" & "_checksum"& @CRLF)
-FileWriteline($TPLASC, "F; Not Implemented SEP2014, soon to be retrieved from EVOware logfiles...;" & "_checksum"&  @CRLF)
-FileWriteline($TPLASC, "L;" & "_checksum"& @CRLF)
+$Header = "F; Evoware Logfile names and location will be written here;"
+FileWriteline($TPLASC, "F; Evoware Logfile names and location will be written here;" & _HFecksum($Header)& @CRLF)
+$Header = "F; Not Implemented SEP2014, soon to be retrieved from EVOware logfiles...;"
+FileWriteline($TPLASC, "F; Not Implemented SEP2014, soon to be retrieved from EVOware logfiles...;" & _HFecksum($Header)&  @CRLF)
+$header = "L;"
+FileWriteline($TPLASC, "L;" & _HFecksum($Header)& @CRLF)
 
 If $LOGFILE = 1 Then _SendAndLog("File created: " & $TPLASCPath & $TrayID & ".evo", $Logname, True)
 
@@ -357,10 +367,43 @@ If $LOGFILE = 1	then Fileopen($Logname, 1)
 EndFunc ;Func _ClearLogFile()
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Func _Checksum()
+Func _Checksum($TPLwrite, $ASCwrite)
 
+Local $count = StringToASCIIArray($TPLwrite & $ASCwrite)
 
+Local $sum
+Local $add
+Global $checksum
 
+;recursive count of $count
+For $k= 1 to Ubound($count)-1
+	$add = $count[$k]
+	$Sum = $add + $sum
+Next
+
+$checksum = Mod($sum, 64) +33
+return($checksum)
+;msgbox(0,"", $checksum)
+EndFunc ;Func _ClearLogFile()
+;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Func _HFecksum($Header)
+
+Local $count = StringToASCIIArray($Header)
+
+Local $sum
+Local $add
+Global $checksum
+
+;recursive count of $count
+For $k= 1 to Ubound($count)-1
+	$add = $count[$k]
+	$Sum = $add + $sum
+Next
+
+$checksum = Mod($sum, 64) +33
+return($checksum)
+;msgbox(0,"", $checksum)
 EndFunc ;Func _ClearLogFile()
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ; Execution of script:
