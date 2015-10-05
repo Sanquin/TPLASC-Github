@@ -1,6 +1,6 @@
 ; **************************************************************************************************************************************
 ;
-; TPLASC version 0.17 Dion Methorst & Ed Nieuwenhuys, Sanquin IPB IMMC/CAP, September 2014.
+; TPLASC version 0.18 Dion Methorst & Ed Nieuwenhuys, Sanquin Amsterdam, September 2014.
 ; concatenates your Tecan EVO TPL and ASCII files for direct use in LIMS database
 ;
 ; **************************************************************************************************************************************
@@ -34,27 +34,38 @@
 ;			addition of lines U; username T; trayID  and A; Evo magellan.mth with MacihneSqnNumberID
 ;			addition of logfilenames from logfile folder
 ;			checking if TrayID of ASCii file matches TPL file, ends script if not
-;			change 'D' identiefier in $aTPL array to 'R' for result identiefier in TrayID.evo file
+; V0.17		change 'D' identifier in $aTPL array to 'R' for result identiefier in TrayID.evo file
+; V.018		Fix error in checksum
+;
+; ToDo (?)	improve: recursive checksum functions
+; 			improve: checking of trayID comparison and error logging
+;			improve: clear logfile function
+;			addition of Func _EvoLogfiles to read Username and Evoware logfilelist
 ;
 ; **************************************************************************************************************************************
 ;
 ;						   TPL file dataformat must be as follows:
 ;
 ;						   first lines	 				H;1DD-MM-YY;hh:mm:ss
-;														U; user
-;														T; TrayID
-;														A; Evo magellan.mth
-;
-; D wordt een R?		   any subsequent line	 		R;LIMS_ID;SAMPLENAME;MTP_WELLPOSITION;;
-;
-;						   Evoware logfilenames			F;
-;
+; 						   any subsequent line	 		D;LIMS_ID;SAMPLENAME;MTP_WELLPOSITION;;
 ;						   last line					L;
+;
 ;
 ;						   ASCII file dataformat must be as follows:
 ;
 ;						   Any Line 					SAMPLENAME;ASBORBANCE;MTP_WELLPOSITION;OK;
 ;						   Last Line					MagellanMethodName.mth
+;
+;
+;						   output of TPLASC.exe: TrayID.evo file dataformat:
+;
+;						   first lines	 				H;1DD-MM-YY;hh:mm:ss;checksum
+;														U;user;checksum
+;														T;TrayID;checksum
+;														A;Evo magellan.mth;checksum
+; 						   any subsequent line	 		R;LIMS_ID;SAMPLENAME;MTP_WELLPOSITION;checksum
+;						   Evoware logfilenames			F;logfilename;checksum
+;						   last line					L;checksum
 ;
 ; **************************************************************************************************************************************
 ; Functions
@@ -79,6 +90,10 @@
 ; 	- TPLASC.log file is moved to TPLASC1.log when linenumber >100, the old file is overwritten
 ;
 ;	Func _Checksum($check)
+;	- Checksum for $TPLwrite & $ASCwrite strings
+;
+;	Func _HFchecksum($Header)
+;	- checksum for header and footer lines through $Header and $ Footer
 ;
 ; **************************************************************************************************************************************
 
@@ -95,33 +110,32 @@
 #include <WinAPI.au3>
 #include <Constants.au3>
 #include <String.au3>
-;#include <_Zip.au3>
 
-; Defines
+; Defined variables
 Dim Const $LOGFILE = 1						; logfile will be created when $logfile = 1
-Dim Const $MAX = 100						; max number of lines in logfile
+Dim Const $MAX = 200						; max number of lines in logfile
 Global $ASCPath = "C:\apps\EVO\asc\"		; ASCII file path
 Global $TPLPath = "C:\apps\EVO\TPL\"		; TPL file pathfilename extracted from ASCII file: MBL110File created: C:\apps\EVO\TPLASC\MBL110.evo
 Global $TPLASCPath = "C:\apps\EVO\TPLASC\"	; path of TPLASC *.evo files
 Global $Logname = $TPLASCPath &"TPLSASClog.log"; path & name of logfile
 Global $aASC								; ASCII file read to array from $aASCsearch2D array (1st file from list sorted on dat, use _arraydisplay to check)
 Global $aTPL								; TPL file read to array from $aTPLsearch2D array (1st file from list sorted on dat, use _arraydisplay to check)
-Global $TPLASC 								; new *.evo file to write concatenated data to
-Local $TrayID								; ASCII filename = name for the new TPLASC file = $TrayID.evo
-local $checkTPL 							; checks for the right format of ASCII folder
-local $checkASC								; checks for the right format of TPL folder
-local $aTPLsearch							; lists files in $ASCPath in array for examination
-local $aASCsearch							; lists files in $TPlPath in array for examination
-local $aTPLsearch2D							; lists file in $aTPLsearch	in array for examination
-local $aASCsearch2D							; lists file in $aASCsearch	in array for examination
-local $aASCSamLen							; length of samplename in ASC-file ; samplename is always found in front of 1st ";" in ASCline file
-local $TPLSamPos							; position of samplename in TPL file with linenumber corresponding to same samplename in Ascifile line
-local $MTPpos								; position of MTP well number is always found 1 Chr to the right of the 2nd  ";" in the ASClinenumber
-local $Well									; $Well is the MTP position: 3 characters read from the ASCii line at $MTPpos
-Local $aASCSample							; Samplename from ASCline (number of the loop
-Local $TPLSample							; Samplename from the TPLfile linenumber with the same MTP position ($Well) as the ASCfile linenumber (in the loop)
-local $TPLine								; the TPL file line number at which the same MTP position is found as in the ASCii file
-local $ASCLine								; the ASCII file line number
+;local $TPLASC 								; new *.evo file to write concatenated data to
+;Local $TrayID								; ASCII filename = name for the new TPLASC file = $TrayID.evo
+;local $checkTPL 							; checks for the right format of ASCII folder
+;local $checkASC							; checks for the right format of TPL folder
+;local $aTPLsearch							; lists files in $ASCPath in array for examination
+;local $aASCsearch							; lists files in $TPlPath in array for examination
+;local $aTPLsearch2D						; lists file in $aTPLsearch	in array for examination
+;local $aASCsearch2D						; lists file in $aASCsearch	in array for examination
+;local $aASCSamLen							; length of samplename in ASC-file ; samplename is always found in front of 1st ";" in ASCline file
+;local $TPLSamPos							; position of samplename in TPL file with linenumber corresponding to same samplename in Ascifile line
+;local $MTPpos								; position of MTP well number is always found 1 Chr to the right of the 2nd  ";" in the ASClinenumber
+;local $Well								; $Well is the MTP position: 3 characters read from the ASCii line at $MTPpos
+;Local $aASCSample							; Samplename from ASCline (number of the loop
+;Local $TPLSample							; Samplename from the TPLfile linenumber with the same MTP position ($Well) as the ASCfile linenumber (in the loop)
+;local $TPLine								; the TPL file line number at which the same MTP position is found as in the ASCii file
+;local $ASCLine								; the ASCII file line number
 ;local $FileName							; _SendAndLog($Logdata, $Filename = -1, $TimeStamp = False)
 ;local $Logdata								; _SendAndLog($Logdata, $Filename = -1, $TimeStamp = False)
 ;local $TimeStamp							; _SendAndLog($Logdata, $Filename = -1, $TimeStamp = False)
@@ -132,7 +146,7 @@ Func _Main()
 
 _TPL_array()
 _ASC_array()
-_TPLASC_concatenator()
+_TPLASC_concatenator($aTPL, $aASC)
 _ClearLogFile()
 
 EndFunc
@@ -181,7 +195,9 @@ For $j = 1 to ubound($aTPL)-1
 Next
 ;_ArrayDisplay($aTPL)
 
-EndFunc
+return($aTPL)
+
+EndFunc ; _TPL_array()
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Func _ASC_array()
 
@@ -217,11 +233,13 @@ _ArraySort($aASCsearch2D,1,1,"",1)
 _FileReadToArray($ASCPath & $aASCsearch2D[1][0], $aASC)
 ;_ArrayDisplay($aASC)
 
-EndFunc
-;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Func _TPLASC_concatenator()
+return($aASC)
 
-; Get TrayID & prepare arrays for concatenation
+EndFunc ; _ASC_array()
+;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Func _TPLASC_concatenator(ByRef $aTPL, ByRef $aASC)
+
+; Get TrayID & prepare $aASC (ASCII file) &  $aTPL (TPL file) arrays for concatenation
 
 ; Retrieve TrayID from the ASCII folder first file in the list: always the newest file
 Local	$TrayID = stringtrimright($aASCsearch2D[1][0],4)
@@ -230,8 +248,6 @@ Local	$TrayID = stringtrimright($aASCsearch2D[1][0],4)
 		 MsgBox(4096, "Error Log", "TrayID format incorrect" & @CRLF)
 		 Exit
 	  EndIf
-
-; change to: TrayID ASC is always trayID TPL, if not: ABORT
 
 ; Retrieve TPLfileID from the TPL folder first file in the list: always the newest file
 Local	$TPL_ID = stringtrimright($aTPLsearch2D[1][0],4)
@@ -250,23 +266,21 @@ Local	$TPL_ID = stringtrimright($aTPLsearch2D[1][0],4)
 
 Global $TPLASC = fileopen($TPLASCPath & $TrayID & ".evo", 2 +8)
 
-; CLIS (Sanquin LIMS) commitments write first lines
+; write header lines & checksum		CLIS (Sanquin LIMS) commitments
 ; 									H;1DD-MM-YY;hh:mm:ss
 ;									U; user
 ;									T; TrayID
 ;									A; Evo magellan.mth
-
-
-; header array? + checksum header array function
 Local $header
 $Header = $aTPL[1] & ";"
-FileWriteline($TPLASC, $aTPL[1] & ";" & _HFecksum($Header) &  @CRLF)
+FileWriteline($TPLASC, $aTPL[1] & ";" & _HFchecksum($Header) &  @CRLF)
 $Header = "U;Username; Not Implemented SEP2014, soon to be retrieved from EVOware logfiles...;"
-FileWriteline($TPLASC, "U;Username; Not Implemented SEP2014, soon to be retrieved from EVOware logfiles..." & ";" & _HFecksum($Header) &  @CRLF)
+FileWriteline($TPLASC, "U;Username; Not Implemented SEP2014, soon to be retrieved from EVOware logfiles..." & ";" & _HFchecksum($Header) &  @CRLF)
 $Header = "T;" & $TrayID & ";"
-FileWriteline($TPLASC, "T;" & $TrayID & ";" & _HFecksum($Header) &  @CRLF)
+FileWriteline($TPLASC, "T;" & $TrayID & ";" & _HFchecksum($Header) &  @CRLF)
 $Header = "A;MagellanMethod;" & $aASC[$aASC[0]] & ";"
-FileWriteline($TPLASC, "A;MagellanMethod;" & $aASC[$aASC[0]] & ";" & _HFecksum($Header) & @CRLF)
+FileWriteline($TPLASC, "A;MagellanMethod;" & $aASC[$aASC[0]] & ";" & _HFchecksum($Header) & @CRLF)
+$Header = ""
 
 ; H;18-07-13;09:54:24;MBL110;MagellanMethod;MBL_EVO28211.mth
 ; write header with H;date;time;EVO;machine ;[$aASC[0]]is the number of lines in the array; here used to read data ;from the last line of the array i.e. :  $ASC[$aASC[0]
@@ -284,7 +298,7 @@ FileWriteline($TPLASC, "A;MagellanMethod;" & $aASC[$aASC[0]] & ";" & _HFecksum($
 ;		 _ArrayDisplay($aTPL)													; display the resulting array after deletion of the 1st and last lines
 ;		 _ArrayDisplay($aASC)
 
-		 If $LOGFILE = 1 Then _SendAndLog("filename extracted from ASCII file: " & $TrayID, $Logname, True)	; write TrayID/ASCII filename to logfile
+If $LOGFILE = 1 Then _SendAndLog("filename extracted from ASCII file: " & $TrayID, $Logname, True)	; write TrayID/ASCII filename to logfile
 
 for $ASCLine = 0 to ubound($aASC)-1
 
@@ -301,35 +315,31 @@ for $ASCLine = 0 to ubound($aASC)-1
 	  $TPLwrite = StringStripWS($aTPL[$TPLine],2)
 	  $ASCwrite = StringStripWS($aASC[$ASCLine],1)
 
-
-
 	  Select
-		 Case $aASCSample = $TPLSample											; determines whether the ASC samplename is the same as the TPL samplename and if so,
+		Case $aASCSample = $TPLSample											; determines whether the ASC samplename is the same as the TPL samplename and if so
 
-			FileWriteline($TPLASC, $TPLwrite & $ASCwrite & _Checksum($TPLwrite, $ASCwrite) & @CRLF) ; write the matching TPL and ASCii data to the TPLASC file
+			FileWriteline($TPLASC, $TPLwrite & $ASCwrite & _Checksum($TPLwrite, $ASCwrite) & @CRLF) 	; write the matching TPL and ASCii data to the TPLASC file
 
-		 Case $aASCSample <> $TPLSample											; if samplenames are not exactly the same a message pops up: check the line numbers int he ASC and tPL files
-
-		 If $LOGFILE = 1 Then _SendAndLog($aASCSample & " & " & $TPLSample & " do not match." & @CRLF _
-													  & "check TPL filelinenumber " & $TPLine & @CRLF _
-													  & "check ASCII filelinenumber " & $ASCLine, $Logname, True)
-																				 ; writes not matching linenumbers to logfile ASCII en TPL linenumbers
+		Case $aASCSample <> $TPLSample											; if samplenames are not exactly the same a message pops up: check the line numbers int he ASC and tPL files
+			 If $LOGFILE = 1 Then _SendAndLog($aASCSample & " & " _
+			 & $TPLSample & " do not match." & @CRLF _
+			 & "check TPL filelinenumber " & $TPLine & @CRLF _
+			 & "check ASCII filelinenumber " & $ASCLine, $Logname, True)		; writes not matching linenumbers to logfile ASCII en TPL linenumbers
 	  EndSelect
-
 next
 
-$Header = "F; Evoware Logfile names and location will be written here;"
-FileWriteline($TPLASC, "F; Evoware Logfile names and location will be written here;" & _HFecksum($Header)& @CRLF)
-$Header = "F; Not Implemented SEP2014, soon to be retrieved from EVOware logfiles...;"
-FileWriteline($TPLASC, "F; Not Implemented SEP2014, soon to be retrieved from EVOware logfiles...;" & _HFecksum($Header)&  @CRLF)
-$header = "L;"
-FileWriteline($TPLASC, "L;" & _HFecksum($Header)& @CRLF)
+$Footer = "F; Evoware Logfile names and location will be written here;"
+FileWriteline($TPLASC, "F; Evoware Logfile names and location will be written here;" & _HFchecksum($Footer)& @CRLF)
+$Footer = "F; Not Implemented SEP2014, soon to be retrieved from EVOware logfiles...;"
+FileWriteline($TPLASC, "F; Not Implemented SEP2014, soon to be retrieved from EVOware logfiles...;" & _HFchecksum($Footer)&  @CRLF)
+$Footer = "L;"
+FileWriteline($TPLASC, "L;" & _HFchecksum($Footer)& @CRLF)
+$Footer = ""
 
 If $LOGFILE = 1 Then _SendAndLog("File created: " & $TPLASCPath & $TrayID & ".evo", $Logname, True)
-
 fileclose($TPLASC)
 
-EndFunc ; Func The TPLASC Concatenator
+EndFunc ;_TPLASC_concatenator(ByRef $aTPL, ByRef $aASC)
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Func _SendAndLog($Logdata, $Filename = -1, $TimeStamp = False)
 
@@ -352,14 +362,14 @@ If $Filename == -1 Then $Filename = $Logname ;$TPLASCPath &"TPLSASClog.log"
         FileWriteLine($hFile, $Logdata)
         FileClose($Filename)
     EndIf
-EndFunc
+EndFunc ;_SendAndLog($Logdata, $Filename = -1, $TimeStamp = False)
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Func _ClearLogFile()
 
+; checks logfile: if existing logfile exceeds maximum number of lines ($MAX) a new logfile1 will be made.
 If $LOGFILE = 1	then Fileopen($Logname, 1)
    If _filecountlines($logname) > $MAX then
 	  filemove($logname, stringtrimright($logname,4) & "1.log", 1 +8)
-	  ;_Zip_Create(stringtrimright($logname,4) & "1.log")
 	  fileopen($logname, 2+8)
    EndIf
    Fileclose($Logname)
@@ -376,7 +386,7 @@ Local $add
 Global $checksum
 
 ;recursive count of $count
-For $k= 1 to Ubound($count)-1
+For $k= 0 to Ubound($count)-1
 	$add = $count[$k]
 	$Sum = $add + $sum
 Next
@@ -384,10 +394,10 @@ Next
 $checksum = Mod($sum, 64) +33
 return($checksum)
 ;msgbox(0,"", $checksum)
-EndFunc ;Func _ClearLogFile()
+EndFunc ;_Checksum($TPLwrite, $ASCwrite)
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Func _HFecksum($Header)
+Func _HFchecksum($Header)
 
 Local $count = StringToASCIIArray($Header)
 
@@ -396,15 +406,32 @@ Local $add
 Global $checksum
 
 ;recursive count of $count
-For $k= 1 to Ubound($count)-1
+For $k= 0 to Ubound($count)-1
 	$add = $count[$k]
 	$Sum = $add + $sum
 Next
 
-$checksum = Mod($sum, 64) +33
+$checksum = Mod($sum , 64) +33
 return($checksum)
 ;msgbox(0,"", $checksum)
 EndFunc ;Func _ClearLogFile()
+
+;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+;Func _EvoLogfiles
+;
+; check windows version, select case win 7 or XP
+;
+; XP C:\program files\tecan\evoware\auditrail\logfiles?
+; Win 7: C:program data\teacan\evoware\logfiles
+; find/search logfiles
+; sort logfiles, check date?, check user
+;
+; return U; username
+; return array with logfilenames (ByRef array $logfilelist)
+;
+;EndFunc ;_EvoLogRead
+;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ; Execution of script:
 _Main()
