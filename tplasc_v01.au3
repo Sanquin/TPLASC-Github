@@ -1,34 +1,40 @@
 ; **************************************************************************************************************************************
 ;
-; TPLASC version 0.20 Dion Methorst & Ed Nieuwenhuys, Sanquin Amsterdam, September 2014.
+; TPLASC version 0.21 Dion Methorst & Ed Nieuwenhuys, Sanquin Amsterdam, September 2014.
 ; concatenates your Tecan EVO TPL and ASCII files for direct use in LIMS database
 ;
 ; **************************************************************************************************************************************
 ;
+; Description of execution:
+;
 ; If an ASCII file and TPL file are present in the folders as defined by $ASCPath  & $TPLPath
 ; AND  the Evoware logfile Trace.txt file is present in the folder dfined by $TrcTxt,
-; then this script will:
-; -	read the TPL file into an array
+; then this program will:
+;
 ; -	read the ASCII file into an array
 ; - TrayID is extracted from ASCII filename
-; - ASCII and TPL array obsolete filelines are then deleted to equal dimension
-; - ASCII filelines are read 1 by 1 in a loop, in each cycle the corresponding line in the TPL file is looked up
-; - In the same loop each cycle the ASCII and TPL data is written to the TPLASC file
-; - The TPLASC.evo file is made in the folder defined by $TPLASCPath
+; -	Finds corresponding TPL file with TPL_ID by comparing to TrayID
+; - read the TPL file into an array
+; - obsolete lines in the ASCII and TPL array are deleted to equalize array dimensions
+; - The TrayID.evo file is created in the folder defined by $TPLASCPath
+; - header lines with checksum are written to the TrayID.evo file
+; - ASCII array entries are read 1 by 1 in a loop, in each cycle the corresponding entry in the TPL array is looked up
+; - In the same loop each cycle the ASCII and TPL data with checksum is written to the TrayID.evo file
+; - footer lines with Evoware logfilenames and checksum are appended to the TrayID.evo file
 ; - While the script is running the SendAndLog function is logging all the crucial events in the scripts
-; - This errorhandling may be incomplete but thusfar hasn't shown any problems that might indicate such
+; - The errorhandling may be incomplete but thusfar hasn't shown any problems that might indicate such
 ;
 ; **************************************************************************************************************************************
 ;
 ; Changelog
 ;
 ; July 2013 : in development
-; V0.11 auto open TPL and ASCII files : in development
-; V0.12 Added Errorhandling & logfile (not fully tested)
-; V0.12 script divided in 3 functions, added main function
-; V0.13 added log function and clearlog function;
-; V0.14 added constant for maximum number lines in logfile, added remarks for linenumbers with logfile function call
-; V0.15 writes complete lastline of ASCII file to TPLASC first line: complete Magellan method filename which contains the sanquin number of the used EVO
+; V0.11 	auto open TPL and ASCII files : in development
+; V0.12 	Added Errorhandling & logfile (not fully tested)
+; V0.12 	script divided in 3 functions, added main function
+; V0.13 	added log function and clearlog function;
+; V0.14 	added constant for maximum number lines in logfile, added remarks for linenumbers with logfile function call
+; V0.15 	writes complete lastline of ASCII file to TPLASC first line: complete Magellan method filename which contains the sanquin number of the used EVO
 ;
 ; September 2014
 ; V0.16 	addition of checksom
@@ -38,30 +44,32 @@
 ; V0.17		change 'D' identifier in $aTPL array to 'R' for result identiefier in TrayID.evo file
 ; V0.18		Fix error in checksum
 ;			Changed ;L flag in TPL file to ;L; in $aTPL output
-; V0.20		Addition of function _EvoLogfiles
+; V0.20		Addition of function _EvoLogfiles: extracts last three logfilenames form Evoware logfile folder Trace.txt file
 ;			re-arrangement of function calls and passing of variables
+; V0.21		ASC TrayID now used to find TPL_ID (previous version sorted on latest/newest TPL and ASCII and then compared TRayID to TPL_ID)
+;			Using the TrayID to find the TPL_ID allows for multiple scheduled processes (innstances) in one run
+;			Logging of TrayID and TPL_ID to TPLASC logfile
 ;
-; ToDo (?) improve: clear logfile function
-;			multiple ASCII files in obne run: trayID from newest TPL, archive TPL, archive asci:
-; 				filemove($TPLPath & $aTPLsearch2D[1][0], $ArchPath & "\tpl\" & $aTPLsearch2D[1][0], 1+8)
-; 				filemove($ASCPath & $aASCsearch2D[1][0], $ArchPath & "\asc\" & $aASCsearch2D[1][0], 1+8)
+;
+; ToDo (?) improve: send_and_log & clear logfile function
+;			improve errorlogging: errorlogging: check for TPL_ID = Tray_ID, check if TPL folder contains, check is entries in ASC match entries in TPL
 ;
 ; **************************************************************************************************************************************
 ;
-;						   TPL file dataformat must be as follows:
+;						  TPL file dataformat must be as follows:
 ;
 ;						   first lines	 				H;1DD-MM-YY;hh:mm:ss
 ; 						   any subsequent line	 		D;LIMS_ID;SAMPLENAME;MTP_WELLPOSITION;;
 ;						   last line					L;
 ;
 ;
-;						   ASCII file dataformat must be as follows:
+;						  ASCII file dataformat must be as follows:
 ;
 ;						   Any Line 					SAMPLENAME;ASBORBANCE;MTP_WELLPOSITION;OK;
 ;						   Last Line					MagellanMethodName.mth
 ;
 ;
-;						   output of TPLASC.exe: TrayID.evo file dataformat:
+;						  output of TPLASC.exe: TrayID.evo file dataformat:
 ;
 ;						   first lines	 				H;1DD-MM-YY;hh:mm:ss;checksum
 ;														U;user;checksum
@@ -84,9 +92,11 @@
 ; 	- The ASC and TPL linenumbers with corresponding MTP wellnumbers are then written to $TPLASCpath & $TrayID.evo file
 ;
 ; 	Func _TPL_array(ByRef $aTPL, ByRef $TPL_ID) & Func _ASC_array(ByRef $aASC, ByRef $TrayID)
-;	- The last created (newest) TPL and ASCii files are read into a TPL and an ASC array
+;	- The last created (newest) ASCii files are read into the $aASC array
 ; 	- $TrayID is the name of the ASCII file which is extracted from the C:\apps\EVO\ASC\ filelist read in to the $aASCsearch2D array
-; 	- $TPL_ID is the name of the TPL file which is extracted from the C:\apps\EVO\TPL\ filelist read in to the $aASCsearch2D array
+;	- The $TPL_ID is set as stringtrimright($aTPLsearch2D[$aIndex][0],4) array, where the $aIndex is the indexnumber of the first column
+;	  in the $aTPLsearch2D array where the TPL filename 'TrayID & ".tpl"' is found.
+; 	- $TPL_ID is the name of the TPL file which is extracted from the C:\apps\EVO\TPL\ filelist read in to the $aTPLsearch2D array
 ;
 ;	Func _EvoLogfiles(ByRef $Date , ByRef $Time , ByRef $Username , ByRef $Logfile1 , ByRef $Logfile2 , ByRef $Logfile3)
 ;	- retrieves Evoware logfilepaths, username, date and time from Evoware Trace.txt file
@@ -104,11 +114,13 @@
 ;	- checksum for header and footer lines through $Header and $Footer
 ;
 ; **************************************************************************************************************************************
-
+;
 ; Start of script
+;
 #include <Array.au3>
 #include <file.au3>
 #include <Date.au3>
+#include <String.au3>
 #include <GUIConstants.au3>
 #include <GUIConstantsEx.au3>
 #include <WindowsConstants.au3>
@@ -117,23 +129,26 @@
 #include <GuiStatusBar.au3>
 #include <WinAPI.au3>
 #include <Constants.au3>
-#include <String.au3>
 
 ; Defined variables
 Dim Const $LOGFILE = 1										; logfile will be created when $logfile = 1
-Dim Const $MAX = 200										; max number of lines in logfile
+Dim Const $MAX = 500										; max number of lines in logfile
 Global $ASCPath = "C:\apps\EVO\asc\"						; ASCII file path
 Global $TPLPath = "C:\apps\EVO\TPL\"						; TPL file pathfilename extracted from ASCII file: MBL110File created: C:\apps\EVO\TPLASC\MBL110.evo
 Global $TPLASCPath = "C:\apps\EVO\TPLASC\"					; path of TPLASC *.evo files
 Global $Logname = $TPLASCPath &"TPLSASClog.log"				; path & name of TPLASC logfile
-Global $ArchPath = "C:\apps\EVO\Archief\"				; Archive path for copied ASCII files
-;local $TrcTxt = "C:\ProgramData\Tecan\Evoware\AuditTrail\log\Trace.txt" ; path & name of Evoware Trace.txt logfile
+Global $ArchPath = "C:\apps\EVO\Archief\"					; Archive path for copied ASCII files
+;local $TrcTxt = "C:\ProgramData\Tecan\Evoware\AuditTrail\log\Trace.txt" ;=Win7/8/9,
+;local $TrcTxt =C:\Program Files\Tecan\Evoware\AuditTrail\log\Trace.txt" ;= WinXP path & name of Evoware Trace.txt logfile
+;
 ;local $aASC								; ASCII file read to array from $aASCsearch2D array (1st file from list sorted on dat, use _arraydisplay to check)
 ;local $aTPL								; TPL file read to array from $aTPLsearch2D array (1st file from list sorted on dat, use _arraydisplay to check)
 ;local $header								; data for header checksum
 ;local footer								; data for footer checksum
 ;local $TPLASC 								; new *.evo file to write concatenated data to
 ;Local $TrayID								; ASCII filename = name for the new TPLASC file = $TrayID.evo
+;local $aIndex							; $aIndex = _ArraySearch($aTPLsearch2D, $TrayID & ".tpl")
+;local $TPL_ID							; $TPL_ID = stringtrimright($aTPLsearch2D[$aIndex][0],4)
 ;local $checkTPL 							; checks for the right format of ASCII folder
 ;local $checkASC							; checks for the right format of TPL folder
 ;local $aTPLsearch							; lists files in $ASCPath in array for examination
@@ -178,8 +193,8 @@ Func _TPLASC_concatenator()
 
 local $aTPL = ""
 local $aASC = ""
-local $TrayID = ""		;$aASCsearch2D[1][0],4
-local $TPL_ID = ""		;$aTPLsearch2D[1][0],4
+local $TrayID = ""		;stringtrimright($aASCsearch2D[1][0],4)
+local $TPL_ID = ""		;stringtrimright($aTPLsearch2D[$aIndex][0],4)
 local $Date = ""		;$DateTime[1]
 local $Time = ""		;$DateTime[2]
 local $Username =""		;$filelist[0][1]
@@ -188,8 +203,8 @@ local $Logfile2 = ""	;$filelist[1][2]
 local $Logfile3 = ""	;$filelist[2][2]
 
 ;Read variables from help functions
-_TPL_array($aTPL, $TPL_ID)
 _ASC_array($aASC, $TrayID)
+_TPL_array($aTPL, $TPL_ID, $TrayID)
 _EvoLogfiles($Date , $Time , $Username , $Logfile1 , $Logfile2 , $Logfile3)
 
 ;If TrayID and TPL filename do not match the program will end here
@@ -199,7 +214,7 @@ If $TPL_ID<>$TrayID then
  Exit
 EndIf
 
-Global $TPLASC = fileopen($TPLASCPath & $TrayID & ".evo", 2 +8)
+local $TPLASC = fileopen($TPLASCPath & $TrayID & ".evo", 2 +8)
 ; write header lines & checksum		CLIS (Sanquin LIMS) commitments
 ; 									H;1DD-MM-YY;hh:mm:ss
 ;									U; user
@@ -226,8 +241,6 @@ $Header = ""
 
 		 _ArraySort($aTPL, 0, 0, 0, 0)											; array is sorted alphabetically
 		 _ArraySort($aASC, 0, 0, 1, 0)
-
-If $LOGFILE = 1 Then _SendAndLog("filename extracted from ASCII file: " & $TrayID, $Logname, True)	; write TrayID/ASCII filename to logfile
 
 for $ASCLine = 0 to ubound($aASC)-1
 
@@ -271,69 +284,14 @@ $Footer = "L;"
 FileWriteline($TPLASC, $Footer & _HFchecksum($Footer)& @CRLF)
 $Footer = ""
 
+If $LOGFILE = 1 Then _SendAndLog("Logfile1: " & $Logfile1 , $Logname, True)
+If $LOGFILE = 1 Then _SendAndLog("Logfile2: " & $Logfile2 , $Logname, True)
+If $LOGFILE = 1 Then _SendAndLog("Logfile3: " & $Logfile3 & ";" & ".evo", $Logname, True)
 If $LOGFILE = 1 Then _SendAndLog("File created: " & $TPLASCPath & $TrayID & ".evo", $Logname, True)
+
 fileclose($TPLASCPath & $TrayID & ".evo")
 
 EndFunc ;_TPLASC_concatenator(ByRef $aTPL, ByRef $aASC)
-;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Func _TPL_array(ByRef $aTPL, ByRef $TPL_ID)
-
-; Retrieve TPL File for concatenation with ASC file
-; Global $TPLPath = "C:\apps\EVO\TPL\"
-
-$checkTPL = StringRegExp($TPLPath,"^.+\\$",0)
-	  If $checkTPL = 0 Then $TPLath = $TPLPath & "\"
-		 If @error = -1 then
-			Msgbox(0,"","Sorry but " & $TPLPath & " has no files")
-			If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
-			Exit
-		 EndIf
-
-$aTPLsearch = _FileListToArray($TPLPath,"*.TPL",1)
-	  If Not IsArray($aTPLsearch) Then
-		  Msgbox(0,"","Sorry but " & $TPLPath & " has no files")
-			If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
-		  Exit
-	  EndIf
-
-Global $aTPLsearch2D[10][2]
-ReDim $aTPLsearch2D[$aTPLsearch[0]+1][2]
-$aTPLsearch2D[0][0] = $aTPLsearch[0]
-
-For $i=1 to $aTPLsearch[0]
-    $aTPLsearch2D[$i][0] = $aTPLsearch[$i]
-    $aTPLsearch2D[$i][1] = FileGetTime($TPLPath & $aTPLsearch[$i],0,1)
-Next
-
-_ArraySort($aTPLsearch2D,1,1,"",1)
-_FileReadToArray($TPLPath & $aTPLsearch2D[1][0], $aTPL)
-
-; change 'D' to 'R' in $aTPL array
-For $j = 1 to ubound($aTPL)-1
-	Local $DtoR
-	If StringLeft ( $aTPL[$j], 1 ) = "D" Then
-	$DtoR = StringReplace ($aTPL[$j], "D" , "R" , 1, 0 )
-	$aTPL[$j] = $DtoR
-	EndIf
-	Local $L
-	If Stringright ( $aTPL[$j], 2 ) = ";L" Then
-	$L = StringReplace ($aTPL[$j], ";L" , ";L;" , 0, 0)
-	$aTPL[$j] = $L
-	EndIf
-Next
-
-; Retrieve TPL filename ID
-	$TPL_ID = stringtrimright($aTPLsearch2D[1][0],4)
-	  If @error = -1 then
-		 If $LOGFILE = 1 Then _SendAndLog($TPL_ID & "TPL_ID error", $Logname, True)
-		 MsgBox(4096, "Error Log", "TPL_ID format incorrect" & @CRLF)
-		 Exit
-	  EndIf
-
-;filemove($TPLPath & $aTPLsearch2D[1][0], $ArchPath & "\tpl\" & $aTPLsearch2D[1][0], 1+8)
-;_ArrayDisplay($aTPL)
-EndFunc ; _TPL_array()
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Func _ASC_array(ByRef $aASC, ByRef $TrayID)
@@ -345,14 +303,16 @@ $checkASC = StringRegExp($ASCPath,"^.+\\$",0)
 	  If $checkASC = 0 Then $ASCPath = $ASCPath & "\"
 		 If @error = -1 Then
 			If $LOGFILE = 1 Then _SendAndLog($ASCPath & " has no *.ASC files", $Logname, True)
-			Msgbox(0,"Error Log","Sorry but " & $ASCPath & " has no files")
+			Msgbox(0,"Error Log", "   " & $ASCPath & " has no files" & @CRLF & @CRLF & _
+			"    ! Script aborted !")
 		 Exit
 	  EndIf
 
 $aASCsearch = _FileListToArray($ASCPath,"*.Asc",1)
 	  If Not IsArray($aASCsearch) Then
 		 If $LOGFILE = 1 Then _SendAndLog($ASCPath & " has no *.ASC files", $Logname, True)
-			Msgbox(0,"Error Log","Sorry but " & $ASCPath & " has no files")
+			Msgbox(0,"Error Log", "   " & $ASCPath & " has no files" & @CRLF & @CRLF & _
+			"   ! Script aborted !")
 		 Exit
 	  EndIf
 
@@ -376,9 +336,86 @@ $TrayID = stringtrimright($aASCsearch2D[1][0],4)
 		 Exit
 	  EndIf
 
+If $LOGFILE = 1 Then _SendAndLog("ASCII file extracted from C:\apps\EVO\ASC folder: " & $aASCsearch2D[1][0] & ";file date & time of creation: " & $aASCsearch2D[1][1], $Logname, True)
 ; filemove($ASCPath & $aASCsearch2D[1][0], $ArchPath & "\asc\" & $aASCsearch2D[1][0], 1+8)
 ;_ArrayDisplay($aASC)
 EndFunc ; _ASC_array()
+;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Func _TPL_array(ByRef $aTPL, ByRef $TPL_ID, Byref $TrayID)
+
+; Retrieve TPL File for concatenation with ASC file
+; Global $TPLPath = "C:\apps\EVO\TPL\"
+
+$checkTPL = StringRegExp($TPLPath,"^.+\\$",0)
+	  If $checkTPL = 0 Then $TPLath = $TPLPath & "\"
+		 If @error = -1 then
+			Msgbox(0,"Error Log", $TPLPath & " has no files" & @CRLF & @CRLF & _
+			"   ! Script aborted !")
+			If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
+			Exit
+		 EndIf
+
+$aTPLsearch = _FileListToArray($TPLPath,"*.TPL",1)
+	  If Not IsArray($aTPLsearch) Then
+		  Msgbox(0,"Error Log", $TPLPath & " has no files" & @CRLF & @CRLF & _
+			"   ! Script aborted !")
+			If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
+		  Exit
+	  EndIf
+
+Global $aTPLsearch2D[10][2]
+ReDim $aTPLsearch2D[$aTPLsearch[0]+1][2]
+$aTPLsearch2D[0][0] = $aTPLsearch[0]
+
+For $i=1 to $aTPLsearch[0]
+    $aTPLsearch2D[$i][0] = $aTPLsearch[$i]
+    $aTPLsearch2D[$i][1] = FileGetTime($TPLPath & $aTPLsearch[$i],0,1)
+Next
+
+_ArraySort($aTPLsearch2D,1,1,"",1)
+; original sort array on filetime and choose the newest/latest file for comparison with
+;_FileReadToArray($TPLPath & $aTPLsearch2D[1][0], $aTPL))
+;2nd version search on trayID from ascii file
+$aIndex = _ArraySearch($aTPLsearch2D, $TrayID & ".tpl")
+	If @error then
+			 If $LOGFILE = 1 Then _SendAndLog($TrayID & ".tpl file does not exist in TPL file folder, script aborted", $Logname, True)
+			 MsgBox(4096, "Error Log", "Array index incorrect, " & @CRLF & _
+			 $TrayID & ".tpl file does not exist in TPL file folder" & @CRLF & @CRLF & _
+			 "! script aborted !")
+			 Exit
+		  EndIf
+_FileReadToArray($TPLPath & $aTPLsearch2D[$aIndex][0] , $aTPL)
+
+; change 'D' to 'R' in $aTPL array
+For $j = 1 to ubound($aTPL)-1
+	 $aTPL[$j] = StringStripWS($aTPL[$j], $STR_STRIPLEADING + $STR_STRIPTRAILING)
+	Local $DtoR
+	If StringLeft ( $aTPL[$j], 1 ) = "D" Then
+	$DtoR = StringReplace ($aTPL[$j], "D" , "R" , 1, 0 )
+	$aTPL[$j] = $DtoR
+	EndIf
+	; Check for liquid error flag, add ";"
+	Local $L
+	;msgbox(0,"", $aTPL[$j])
+	If Stringright ( $aTPL[$j], 2 ) = ";L" Then
+	$L = StringReplace ($aTPL[$j], ";L" , ";L;" , 1, 0)
+	$aTPL[$j] = $L
+	EndIf
+Next
+
+; Retrieve TPL filename ID
+	$TPL_ID = stringtrimright($aTPLsearch2D[$aIndex][0],4)
+	  If @error = -1 then
+		 If $LOGFILE = 1 Then _SendAndLog($TPL_ID & "TPL_ID error", $Logname, True)
+		 MsgBox(4096, "Error Log", "TPL_ID format incorrect" & @CRLF)
+		 Exit
+	  EndIf
+
+If $LOGFILE = 1 Then _SendAndLog("TPL filename from ASCII file TrayID comparison: " & $aTPLsearch2D[$aIndex][0], $Logname, True)	; write TPL filename to logfile
+; filemanagement for future use:
+; filemove($TPLPath & $aTPLsearch2D[1][0], $ArchPath & "\tpl\" & $aTPLsearch2D[1][0], 1+8)
+EndFunc ; _TPL_array()
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Func _EvoLogfiles(ByRef $Date , ByRef $Time , ByRef $Username , ByRef $Logfile1 , ByRef $Logfile2 , ByRef $Logfile3)
@@ -394,11 +431,12 @@ dim $filelist[3][3]
 
 Select	; determine Windows OS version to select path of Evoware Trace.txt
 	Case @OSVersion = "WIN_81" OR "WIN_8" OR "WIN_7" OR "WIN_VISTA"
-		local $TrcTxt = "C:\Program Files\Tecan\Evoware\AuditTrail\log\Trace.txt"
+		local $TrcTxt = "C:\ProgramData\Tecan\Evoware\AuditTrail\log\Trace.txt"
 	Case @OSVersion = "WIN_XP"
 		local $TrcTxt = "C:\Program Files\Tecan\Evoware\AuditTrail\log\Trace.txt"
 EndSelect
 
+; count lines in Trace.txt and read entries to array
 local $TrcTxtCount = _FileCountLines($TrcTxt)
 _FileReadToArray($TrcTxt, $arLOG)
 local $arCount = $arLOG[0]
@@ -493,6 +531,7 @@ EndFunc ;_Checksum($TPLwrite, $ASCwrite)
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Func _HFchecksum($Header)
+;$Heder or $Footer
 
 Local $count = StringToASCIIArray($Header)
 
@@ -514,7 +553,8 @@ EndFunc ;Func _ClearLogFile()
 ; Execution of script:
 _Main()
 
-Global $ASCPath = ""
-Global $TPLPath = ""
-Global $TPLASCPath = ""
-Global $Logname = ""
+Global $ASCPath = ""					; ASCII file path
+Global $TPLPath = ""					; TPL file pathfilename extracted from ASCII file: MBL110File created: C:\apps\EVO\TPLASC\MBL110.evo
+Global $TPLASCPath = ""					; path of TPLASC *.evo files
+Global $Logname = ""					; path & name of TPLASC logfile
+Global $ArchPath = ""					; Archive path for copied ASCII files
