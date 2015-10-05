@@ -1,6 +1,6 @@
 ; **************************************************************************************************************************************
 ;
-; TPLASC version 0.24 Dion Methorst & Ed Nieuwenhuys, Sanquin Amsterdam, April 2015.
+; TPLASC version 0.25 Dion Methorst & Ed Nieuwenhuys, Sanquin Amsterdam, April 2015.
 ; concatenates your Tecan EVO TPL and ASCII files for direct use in LIMS database
 ;
 ; **************************************************************************************************************************************
@@ -55,10 +55,10 @@
 ; V0.23		r304-314: Move TrayID.tpl and TrayID.ASC to Zipped Archive and delete original TPL & ASC-files
 ; April 2015
 ; V0.24		added ini file section for easy adaptation of filepaths (builtin reset to default upon deletion)
+; V0.25		fixed failure extracting correct logfiles from trace.txt in Tecan audittrail
+;			added errorlogging for headerline in custom TPL-files
 ;
 ; ToDo (?) 	- improve: send_and_log & clear logfile function
-;			- improve errorlogging: check for TPL_ID = Tray_ID, check if TPL folder contains, check if entries in ASC match entries in TPL
-;			- ini file for filepaths and constants logging adn zipfunctions, display messageboxes and arraydisplays for better errorhandling and debugging purposes
 ;			- create separate version of this program for C1inh assays.
 ;
 ; **************************************************************************************************************************************
@@ -142,7 +142,7 @@
 If not FileExists("C:\Apps\EVO\tplasc\TPLASC.ini") then
 	Local $iniPath = "AscPath=C:\Apps\EVO\asc\" & @LF & "TplPath=C:\Apps\EVO\tpl\" & @LF & "TPLASCpath=C:\Apps\EVO\tplasc\" _
 	& @LF & "LogfilePath=C:\Apps\EVO\tplasc\" & @LF & "ArchivePath=C:\apps\EVO\Archief\"& @LF
-    Local $iniLog = "Logfile=1" & @LF & "Logfilename=TPLSASClog.log" & @LF & "Max_lines=500"
+    Local $iniLog = "Logfile=1" & @LF & "Logfilename=TPLSASClog.log" & @LF & "Max_lines=500" & @LF & "ZipFileToArchive=Yes"
 	IniWriteSection("C:\Apps\EVO\tplasc\TPLASC.ini", "Paths", $iniPath)
 	IniWriteSection("C:\Apps\EVO\tplasc\TPLASC.ini", "Log", $iniLog)
 	Endif
@@ -286,7 +286,7 @@ for $ASCLine = 0 to ubound($aASC)-1
 
 			FileWriteline($TPLASC, $TPLwrite & $ASCwrite & _Checksum($TPLwrite, $ASCwrite) & @CRLF) 	; write the matching TPL and ASCii data to the TPLASC file
 																										; format: R;LIMS_ID;SAMPLENAME;MTP_WELLPOSITION;checksum
-		Case $aASCSample <> $TPLSample											; if samplenames are not exactly the same a message pops up: check the line numbers int he ASC and tPL files
+																									 Case $aASCSample <> $TPLSample											; if samplenames are not exactly the same a message pops up: check the line numbers int he ASC and
 			If $LOGFILE = 1 Then _SendAndLog($aASCSample & " & " _
 			& $TPLSample & " do not match." & @CRLF _
 			& "check TPL filelinenumber " & $TPLine & @CRLF _
@@ -419,16 +419,24 @@ Next
 _ArraySort($aTPLsearch2D,1,1,"",1)
 ; original sort array on filetime and choose the newest/latest file for comparison with
 ;_FileReadToArray($TPLPath & $aTPLsearch2D[1][0], $aTPL))
-;2nd version search on trayID from ascii file
 $aIndex = _ArraySearch($aTPLsearch2D, $TrayID & ".tpl")
-	If @error then
-			 If $LOGFILE = 1 Then _SendAndLog($TrayID & ".tpl file does not exist in TPL file folder, script aborted", $Logname, True)
-			 MsgBox(4096, "Error Log", "Array index incorrect, " & @CRLF & _
-			 $TrayID & ".tpl file does not exist in TPL file folder" & @CRLF & @CRLF & _
-			 "! script aborted !")
-			 Exit
-		  EndIf
+If @error then
+	  If $LOGFILE = 1 Then _SendAndLog($TrayID & ".tpl file does not exist in TPL file folder, script aborted", $Logname, True)
+		  MsgBox(4096, "Error Log", "Array index incorrect, " & @CRLF & _
+		  $TrayID & ".tpl file does not exist in TPL file folder" & @CRLF & @CRLF & _
+		  "! script aborted !")
+	  Exit
+EndIf
+
 _FileReadToArray($TPLPath & $aTPLsearch2D[$aIndex][0] , $aTPL)
+
+If stringleft($aTPL[1],2)<> "H;" then
+	  MsgBox(4096, "Error Log", "Array index incorrect, " & @CRLF & _
+		 $TrayID & ".tpl :first line in file does not contain H; date & time header" & @CRLF & @CRLF & _
+		 "! check "& $TrayID & ".tpl, script aborted !")
+		 If $LOGFILE = 1 Then _SendAndLog($TrayID & ".tpl :first line in file does not contain H; date & time header, script aborted", $Logname, True)
+	  Exit
+   EndIf
 
 ; change 'D' to 'R' in $aTPL array
 For $j = 1 to ubound($aTPL)-1
@@ -478,10 +486,23 @@ local $TrcTxt
 
 Select	; determine Windows OS version to select path of Evoware Trace.txt
    Case $Windows = "WIN_7" ;OR "WIN_8" OR "WIN_7" OR "WIN_VISTA"
-	  $TrcTxt = "C:\ProgramData\Tecan\Evoware\AuditTrail\log\trace.txt"
+		 $TrcTxt = "C:\ProgramData\Tecan\Evoware\AuditTrail\log\trace.txt"
+		 If @error then
+		 If $LOGFILE = 1 Then _SendAndLog("C:\ProgramData\Tecan\Evoware\AuditTrail\log\trace.txt not found, script aborted", $Logname, True)
+			 MsgBox(4096, "Error Log", "Array index incorrect, " & @CRLF & _
+			 "C:\ProgramData\Tecan\Evoware\AuditTrail\log\trace.txt not found" & @CRLF & @CRLF & _
+			 "! script aborted !")
+		 Exit
+		 EndIf
 	Case $Windows = "WIN_XP"
-	  $TrcTxt = "C:\Program Files\Tecan\Evoware\AuditTrail\log\trace.txt"
-		;$TrcTxt = "C:\apps\EVO\ProgramData\Tecan\Evoware\AuditTrail\log\trace.txt"
+		 $TrcTxt = "C:\Program Files\Tecan\Evoware\AuditTrail\log\trace.txt"
+		 If @error then
+		 If $LOGFILE = 1 Then _SendAndLog("C:\Program Files\Tecan\Evoware\AuditTrail\log\trace.txt not found, script aborted", $Logname, True)
+			 MsgBox(4096, "Error Log", "Array index incorrect, " & @CRLF & _
+			 "C:\Program Files\Tecan\Evoware\AuditTrail\log\trace.txt" & @CRLF & @CRLF & _
+			 "! script aborted !")
+		 Exit
+		 EndIf
 EndSelect
 
 ; count lines in Trace.txt and read entries to array
@@ -489,24 +510,31 @@ local $TrcTxtCount = _FileCountLines($TrcTxt)
 _FileReadToArray($TrcTxt, $arLOG)
 local $arCount = $arLOG[0]
 
+;_arraydisplay($arLOG)
 ; delete all non-.log files from array...
-While Stringright($arLOG[$arCount], 4) <> ".log"
-  _arraydelete($arLOG, $arCount)
-  $arCount = $arLOG[0]
-WEnd
+local $i = 0
+For $h = $TrcTxtCount to 1 step -1
 
-for $i = 0 to 2
-	; Split last array entry from $arLOG to $Logfile array
-	local $Logfile = StringSplit ( stringreplace(_arraypop($arLOG), "  ", ";"), ";", 1)
-	$j= $Logfile[0]
-	While $j>0 						;delete empty entries in $Logfile
-		If  $Logfile[$j] = "" then _arraydelete($Logfile,$j)
-		$j = $j-1
-	Wend
-	$filelist[$i][0] = $Logfile[1]	; Date & Time
-	$filelist[$i][1] = $Logfile[2]	; Username
-	$filelist[$i][2] = $Logfile[3]	; Evoware Logfile path
-next
+   If Stringright($arLOG[$h], 4) = ".log" then
+	   ; Split the first found LOG file entry from $arLOG to $Logfile array
+	   local $Logfile = StringSplit ( stringreplace($arLOG[$h], "  ", ";"), ";", 1)
+	   $j= $Logfile[0]
+		  While $j>0 						;delete empty entries in $Logfile
+			  If  $Logfile[$j] = "" then _arraydelete($Logfile,$j)
+			  $j = $j-1
+		  Wend
+	   $filelist[$i][0] = $Logfile[1]	; Date & Time
+	   $filelist[$i][1] = $Logfile[2]	; Username
+	   $filelist[$i][2] = $Logfile[3]	; Evoware Logfile path
+	   $i = $i+1
+   ElseIf @error Then
+	  MsgBox($MB_SYSTEMMODAL, "Error", "Error reading trace.txt")
+	  Exit
+   EndIf
+
+   $TrcTxtCount = $TrcTxtCount-1
+   If $i = 3 then ExitLoop
+   Next
 
 ;_ArrayDisplay($filelist)
 $DateTime = StringSplit ( $filelist[0][0], " ", 1)
@@ -523,27 +551,33 @@ EndFunc ;_EvoLogfiles()
 Func _SendAndLog($Logdata, $Filename = -1, $TimeStamp = False)
 
 ;line		log
-;	236		If $LOGFILE = 1 Then _SendAndLog($TrayID & "TPL & ASCII files don't match, check fileame and date", $Logname, True)
-;	290		Case $aASCSample <> $TPLSample											; if samplenames are not exactly the same a message pops up: check the line numbers int he ASC and tPL files
-;			If $LOGFILE = 1 Then _SendAndLog($aASCSample & " & " _
+;	235		If $LOGFILE = 1 Then _SendAndLog($TrayID & "TPL & ASCII files don't match, check fileame and date", $Logname, True)
+;	289		If $LOGFILE = 1 Then _SendAndLog($aASCSample & " & " _
 ;			& $TPLSample & " do not match." & @CRLF _
 ;			& "check TPL filelinenumber " & $TPLine & @CRLF _
 ;			& "check ASCII filelinenumber " & $ASCLine, $Logname, True)		; writes not matching linenumbers to logfile ASCII en TPL linenumbers
 ;	310		If $LOGFILE = 1 Then _SendAndLog("Logfile1: " & $Logfile1 , $Logname, True)
-;	320		If $LOGFILE = 1 Then _SendAndLog("Logfile2: " & $Logfile2 , $Logname, True)
-;	321		If $LOGFILE = 1 Then _SendAndLog("Logfile3: " & $Logfile3 & ";" & ".evo", $Logname, True)
-;	322		If $LOGFILE = 1 Then _SendAndLog("File created: " & $TPLASCPath & $TrayID & ".evo", $Logname, True)
-;	338		If $LOGFILE = 1 Then _SendAndLog($ASCPath & " has no *.ASC files", $Logname, True)
-;	338		If $LOGFILE = 1 Then _SendAndLog($ASCPath & " has no *.ASC files", $Logname, True)
-;	367		If $LOGFILE = 1 Then _SendAndLog($TrayID & "TrayID error", $Logname, True)
-;	372		If $LOGFILE = 1 Then _SendAndLog("ASCII file extracted from C:\apps\EVO\ASC folder: " & $aASCsearch2D[1][0] & ";file date & time of creation: " & $aASCsearch2D[1][1], $Logname, True)
-;	388		If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
-;	396		If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
-;	415		 If $LOGFILE = 1 Then _SendAndLog($TrayID & ".tpl file does not exist in TPL file folder, script aborted", $Logname, True)
-;	435		If $LOGFILE = 1 Then _SendAndLog($TPL_ID & "TPL_ID error", $Logname, True)
-;	449		If $LOGFILE = 1 Then _SendAndLog("TPL filename from ASCII file TrayID comparison: " & $aTPLsearch2D[$aIndex][0], $Logname, True)
+;	311		If $LOGFILE = 1 Then _SendAndLog("Logfile2: " & $Logfile2 , $Logname, True)
+;	312		If $LOGFILE = 1 Then _SendAndLog("Logfile3: " & $Logfile3 & ";" & ".evo", $Logname, True)
+;	313		If $LOGFILE = 1 Then _SendAndLog("File created: " & $TPLASCPath & $TrayID & ".evo", $Logname, True)
+;	322		_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl added to" & $Archpath & "ASCzip & TPLzip archives.", $Logname, True)
+;	325		_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl deleted from their directories.", $Logname, True)
+;	327		_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl NOT added to" & $Archpath & "ASCzip & TPLzip archives.", $Logname, True)
+;	328		_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl NOT deleted from their directories.", $Logname, True)
+;	329		_SendAndLog("Something went wrong. Check your assay: Joblist OK? Barcodes OK?", $Logname, True)
+;	347		If $LOGFILE = 1 Then _SendAndLog($ASCPath & " has no *.ASC files", $Logname, True)
+;	355		If $LOGFILE = 1 Then _SendAndLog($ASCPath & " has no *.ASC files", $Logname, True)
+;	376		If $LOGFILE = 1 Then _SendAndLog($TrayID & "TrayID error", $Logname, True)
+;	381		If $LOGFILE = 1 Then _SendAndLog("ASCII file extracted from C:\apps\EVO\ASC folder: " & $aASCsearch2D[1][0] & ";file date & time of creation: " & $aASCsearch2D[1][1], $Logname, True)
+;	397		If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
+;	405		If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
+;	423		 If $LOGFILE = 1 Then _SendAndLog($TrayID & ".tpl file does not exist in TPL file folder, script aborted", $Logname, True)
+;	436		If $LOGFILE = 1 Then _SendAndLog($TPL_ID & "TPL_ID error", $Logname, True)
+; 	463		If $LOGFILE = 1 Then _SendAndLog($TrayID & ".tpl :first line in file does not contain H; date & time header, script aborted", $Logname, True)
+;	468		If $LOGFILE = 1 Then _SendAndLog("TPL filename from ASCII file TrayID comparison: " & $aTPLsearch2D[$aIndex][0], $Logname, True)
+;	490		If $LOGFILE = 1 Then _SendAndLog("C:\ProgramData\Tecan\Evoware\AuditTrail\log\trace.txt not found, script aborted", $Logname, True)
+;	499		If $LOGFILE = 1 Then _SendAndLog("C:\Program Files\Tecan\Evoware\AuditTrail\log\trace.txt not found, script aborted", $Logname, True)
 
-;
 If $Filename == -1 Then $Filename = $Logname ;$TPLASCPath &"TPLSASClog.log"
    ;Send($Logdata)
    $hFile = FileOpen($FileName, 1)
