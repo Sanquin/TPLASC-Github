@@ -1,6 +1,6 @@
 ; **************************************************************************************************************************************
 ;
-; TPLASC version 0.22 Dion Methorst & Ed Nieuwenhuys, Sanquin Amsterdam, November 2014.
+; TPLASC version 0.23 Dion Methorst & Ed Nieuwenhuys, Sanquin Amsterdam, December 2014.
 ; concatenates your Tecan EVO TPL and ASCII files for direct use in LIMS database
 ;
 ; **************************************************************************************************************************************
@@ -8,14 +8,14 @@
 ; Description of execution:
 ;
 ; If an ASCII file and TPL file are present in the folders as defined by $ASCPath  & $TPLPath
-; AND  the Evoware logfile Trace.txt file is present in the folder dfined by $TrcTxt,
+; AND  the Evoware logfile Trace.txt file is present in the folder defined by $TrcTxt,
 ; then this program will:
 ;
-; -	read the ASCII file into an array
+; -	Read the ASCII file into an array
 ; - TrayID is extracted from ASCII filename
 ; -	Finds corresponding TPL file with TPL_ID by comparing to TrayID
-; - read the TPL file into an array
-; - obsolete lines in the ASCII and TPL array are deleted to equalize array dimensions
+; - Read the TPL file into an array
+; - Obsolete lines in the ASCII and TPL array are deleted to equalize array dimensions
 ; - The TrayID.evo file is created in the folder defined by $TPLASCPath
 ; - Header lines with checksum are written to the TrayID.evo file
 ; - ASCII array entries are read 1 by 1 in a loop, in each cycle the corresponding entry in the TPL array is looked up
@@ -50,10 +50,15 @@
 ;			Using the TrayID to find the TPL_ID allows for multiple scheduled processes (innstances) in one run
 ;			Logging of TrayID and TPL_ID to TPLASC logfile
 ; V0.22		Strip whitespace from TPL file, to identify the 'L' liquid error flag
-;			Added column for liqud error input ";L;"
+;			Added column for liquid error input ";L;"
+; December 2014
+; V0.23		r304-314: Move TrayID.tpl and TrayID.ASC to Zipped Archive and delete original TPL & ASC-files
 ;
-; ToDo (?) 	improve: send_and_log & clear logfile function
-;			improve errorlogging: errorlogging: check for TPL_ID = Tray_ID, check if TPL folder contains, check if entries in ASC match entries in TPL
+; ToDo (?) 	- improve: send_and_log & clear logfile function
+;			- improve errorlogging: check for TPL_ID = Tray_ID, check if TPL folder contains, check if entries in ASC match entries in TPL
+;			- ini file for filepaths and constants logging adn zipfunctions, display messageboxes and arraydisplays for better errorhandling and debugging purposes
+;			- create separate version of this program for C1inh assays.
+;
 ;
 ; **************************************************************************************************************************************
 ;
@@ -130,6 +135,7 @@
 #include <GuiStatusBar.au3>
 #include <WinAPI.au3>
 #include <Constants.au3>
+#include <_Zip.au3>
 
 ; Defined variables
 Dim Const $LOGFILE = 1										; logfile will be created when $logfile = 1
@@ -291,7 +297,26 @@ If $LOGFILE = 1 Then _SendAndLog("Logfile2: " & $Logfile2 , $Logname, True)
 If $LOGFILE = 1 Then _SendAndLog("Logfile3: " & $Logfile3 & ";" & ".evo", $Logname, True)
 If $LOGFILE = 1 Then _SendAndLog("File created: " & $TPLASCPath & $TrayID & ".evo", $Logname, True)
 
+If not fileexists($ArchPath & "TPLzip.zip") then _Zip_Create($ArchPath & "TPLzip.zip",0)
+If not fileexists($ArchPath & "ASCzip.zip") then _Zip_Create($ArchPath & "ASCzip.zip",0)
+_Zip_AddItem($ArchPath & "TPLzip.zip", $TPLPath & $TrayID & ".tpl" , ""  , 21)
+_Zip_AddItem($ArchPath & "ASCzip.zip" , $ASCPath & $TrayID & ".asc" ,  "" , 21)
+
+	Select
+		Case FileExists($ArchPath & "ASCzip.zip")
+			_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl added to" & $Archpath & "ASCzip & TPLzip archives.", $Logname, True)
+			filedelete($ASCPath & $TrayID & ".asc")
+			filedelete($TPLPath & $TrayID & ".tpl")
+			_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl deleted from their directories.", $Logname, True)
+		Case Not FileExists($ArchPath & "TPLzip.zip")
+			_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl NOT added to" & $Archpath & "ASCzip & TPLzip archives.", $Logname, True)
+			_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl NOT deleted from their directories.", $Logname, True)
+			_SendAndLog("Something went wrong. Check your assay: Joblist OK? Barcodes OK?", $Logname, True)
+	EndSelect
+
 fileclose($TPLASCPath & $TrayID & ".evo")
+fileclose($ASCPath & $TrayID & ".asc")
+fileclose($TPLPath & $TrayID & ".tpl")
 
 EndFunc ;_TPLASC_concatenator(ByRef $aTPL, ByRef $aASC)
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -339,7 +364,7 @@ $TrayID = stringtrimright($aASCsearch2D[1][0],4)
 	  EndIf
 
 If $LOGFILE = 1 Then _SendAndLog("ASCII file extracted from C:\apps\EVO\ASC folder: " & $aASCsearch2D[1][0] & ";file date & time of creation: " & $aASCsearch2D[1][1], $Logname, True)
-; filemove($ASCPath & $aASCsearch2D[1][0], $ArchPath & "\asc\" & $aASCsearch2D[1][0], 1+8)
+
 ;_ArrayDisplay($aASC)
 EndFunc ; _ASC_array()
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -419,7 +444,7 @@ Next
 
 If $LOGFILE = 1 Then _SendAndLog("TPL filename from ASCII file TrayID comparison: " & $aTPLsearch2D[$aIndex][0], $Logname, True)	; write TPL filename to logfile
 ; filemanagement for future use:
-; filemove($TPLPath & $aTPLsearch2D[1][0], $ArchPath & "\tpl\" & $aTPLsearch2D[1][0], 1+8)
+
 EndFunc ; _TPL_array()
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -482,25 +507,25 @@ EndFunc ;_EvoLogfiles()
 Func _SendAndLog($Logdata, $Filename = -1, $TimeStamp = False)
 
 ;line		log
-;213		 If $LOGFILE = 1 Then _SendAndLog($TrayID & "TPL & ASCII files don't match, check fileame and date", $Logname, True)
-;267				Case $aASCSample <> $TPLSample											; if samplenames are not exactly the same a message pops up: check the line numbers int he ASC and tPL files
+;	220		 If $LOGFILE = 1 Then _SendAndLog($TrayID & "TPL & ASCII files don't match, check fileame and date", $Logname, True)
+;	274				Case $aASCSample <> $TPLSample											; if samplenames are not exactly the same a message pops up: check the line numbers int he ASC and tPL files
 ;			If $LOGFILE = 1 Then _SendAndLog($aASCSample & " & " _
 ;			& $TPLSample & " do not match." & @CRLF _
 ;			& "check TPL filelinenumber " & $TPLine & @CRLF _
 ;			& "check ASCII filelinenumber " & $ASCLine, $Logname, True)		; writes not matching linenumbers to logfile ASCII en TPL linenumbers
-;287		If $LOGFILE = 1 Then _SendAndLog("Logfile1: " & $Logfile1 , $Logname, True)
-;288		If $LOGFILE = 1 Then _SendAndLog("Logfile2: " & $Logfile2 , $Logname, True)
-;289		If $LOGFILE = 1 Then _SendAndLog("Logfile3: " & $Logfile3 & ";" & ".evo", $Logname, True)
-;290		If $LOGFILE = 1 Then _SendAndLog("File created: " & $TPLASCPath & $TrayID & ".evo", $Logname, True)
-;306		If $LOGFILE = 1 Then _SendAndLog($ASCPath & " has no *.ASC files", $Logname, True)
-;315		If $LOGFILE = 1 Then _SendAndLog($ASCPath & " has no *.ASC files", $Logname, True)
-;335		If $LOGFILE = 1 Then _SendAndLog($TrayID & "TrayID error", $Logname, True)
-;340		If $LOGFILE = 1 Then _SendAndLog("ASCII file extracted from C:\apps\EVO\ASC folder: " & $aASCsearch2D[1][0] & ";file date & time of creation: " & $aASCsearch2D[1][1], $Logname, True)
-;356		If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
-;364		If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
-;383		 If $LOGFILE = 1 Then _SendAndLog($TrayID & ".tpl file does not exist in TPL file folder, script aborted", $Logname, True)
-;412		If $LOGFILE = 1 Then _SendAndLog($TPL_ID & "TPL_ID error", $Logname, True)
-;417		If $LOGFILE = 1 Then _SendAndLog("TPL filename from ASCII file TrayID comparison: " & $aTPLsearch2D[$aIndex][0], $Logname, True)	; write TPL filename to logfile
+;	294		If $LOGFILE = 1 Then _SendAndLog("Logfile1: " & $Logfile1 , $Logname, True)
+;	304		If $LOGFILE = 1 Then _SendAndLog("Logfile2: " & $Logfile2 , $Logname, True)
+;	305		If $LOGFILE = 1 Then _SendAndLog("Logfile3: " & $Logfile3 & ";" & ".evo", $Logname, True)
+;	306		If $LOGFILE = 1 Then _SendAndLog("File created: " & $TPLASCPath & $TrayID & ".evo", $Logname, True)
+;	322		If $LOGFILE = 1 Then _SendAndLog($ASCPath & " has no *.ASC files", $Logname, True)
+;	322		If $LOGFILE = 1 Then _SendAndLog($ASCPath & " has no *.ASC files", $Logname, True)
+;	351		If $LOGFILE = 1 Then _SendAndLog($TrayID & "TrayID error", $Logname, True)
+;	356		If $LOGFILE = 1 Then _SendAndLog("ASCII file extracted from C:\apps\EVO\ASC folder: " & $aASCsearch2D[1][0] & ";file date & time of creation: " & $aASCsearch2D[1][1], $Logname, True)
+;	372		If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
+;	380		If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
+;	399		 If $LOGFILE = 1 Then _SendAndLog($TrayID & ".tpl file does not exist in TPL file folder, script aborted", $Logname, True)
+;	419		If $LOGFILE = 1 Then _SendAndLog($TPL_ID & "TPL_ID error", $Logname, True)
+;	433		If $LOGFILE = 1 Then _SendAndLog("TPL filename from ASCII file TrayID comparison: " & $aTPLsearch2D[$aIndex][0], $Logname, True)
 ;
 If $Filename == -1 Then $Filename = $Logname ;$TPLASCPath &"TPLSASClog.log"
    ;Send($Logdata)
@@ -569,8 +594,3 @@ EndFunc ;Func _ClearLogFile()
 ; Execution of script:
 _Main()
 
-Global $ASCPath = ""					; ASCII file path
-Global $TPLPath = ""					; TPL file pathfilename extracted from ASCII file: MBL110File created: C:\apps\EVO\TPLASC\MBL110.evo
-Global $TPLASCPath = ""					; path of TPLASC *.evo files
-Global $Logname = ""					; path & name of TPLASC logfile
-Global $ArchPath = ""					; Archive path for copied ASCII files
