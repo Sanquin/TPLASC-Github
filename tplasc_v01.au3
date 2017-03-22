@@ -1,9 +1,9 @@
 ; **************************************************************************************************************************************
 ;
-; Sanquin CAP laboratory TPLASC for Tecan EVO general ELISA and C1-inhibitor assays.
+; TPLASC version 0.30 Dion Methorst & Ed Nieuwenhuys, Sanquin Amsterdam, November 2015
 ;
-; TPLASC version 0.28 Dion Methorst & Ed Nieuwenhuys, Sanquin Amsterdam, June 2015.
-; concatenates your Tecan EVO TPL and ASC files for direct use in LIMS database
+; Sanquin CAP laboratory TPLASC is used for Tecan EVO general ELISA and C1-inhibitor assays
+; TPLASC concatenates Tecan EVO TPL and ASC files for direct use in LIMS database
 ;
 ; **************************************************************************************************************************************
 ;
@@ -64,8 +64,12 @@
 ; 			better sorting of $ASC array
 ; V0.28		Swap SampleID comparison array: Use $aTPL as leading array instead of $aASC: see main loop in Func _TPLASC_concatenator(): approx. at line 287
 ;			This change allows use of TPLASC for both ELISA and C1inh assays
-;
-; ToDo (?) 	- improve: send_and_log & clear logfile function
+; V0.29		Moved TPLASC.ini location to @scriptdir
+;			Adapted for Windows 10
+; March 2017
+; V0.30		Fix for faulty lookup of TPL MTP position in ASC array when the last part of the SampleID is similar to the MTP position searchstring.
+;			(For example when TPL MTP_WELLPOSITION = B2; and the $aASC SampleID = Mab2; the wrong ASC MTP_WELLPOSITION was retrieved,
+;			subsequently SampleID's from TPL and ASC did not match and were not written to TPLASC.)
 ;
 ; ************************************************************************************************************************************
 ;
@@ -130,10 +134,6 @@
 ;	Func _HFchecksum($Header)
 ;	- checksum for header and footer lines through $Header and $Footer
 ;
-;
-;
-;
-;
 ; **************************************************************************************************************************************
 ;
 ; Start of script
@@ -153,16 +153,16 @@
 #include <_Zip.au3>
 
 ; default TPLASC.ini will be created when not present in C:\Apps\EVO\tplasc\
-If not FileExists("C:\Apps\EVO\tplasc\TPLASC.ini") then
+If not FileExists(@scriptdir & "\TPLASC.ini") then
 	Local $iniPath = "AscPath=C:\Apps\EVO\asc\" & @LF & "TplPath=C:\Apps\EVO\tpl\" & @LF & "TPLASCpath=C:\Apps\EVO\tplasc\" _
 	& @LF & "LogfilePath=C:\Apps\EVO\tplasc\" & @LF & "ArchivePath=C:\apps\EVO\Archief\"& @LF
     Local $iniLog = "Logfile=1" & @LF & "Logfilename=TPLSASClog.log" & @LF & "Max_lines=500" & @LF & "ZipFileToArchive=1"
-	IniWriteSection("C:\Apps\EVO\tplasc\TPLASC.ini", "Paths", $iniPath)
-	IniWriteSection("C:\Apps\EVO\tplasc\TPLASC.ini", "Log", $iniLog)
+	IniWriteSection(@scriptdir & "\TPLASC.ini", "Paths", $iniPath)
+	IniWriteSection(@scriptdir & "\TPLASC.ini", "Log", $iniLog)
 	Endif
 
-$readPaths = IniReadSection("C:\Apps\EVO\tplasc\TPLASC.ini", "Paths")
-$readLog = IniReadSection("C:\Apps\EVO\tplasc\TPLASC.ini", "Log")
+$readPaths = IniReadSection(@scriptdir & "\TPLASC.ini", "Paths")
+$readLog = IniReadSection(@scriptdir & "\TPLASC.ini", "Log")
 ;_ArrayDisplay($readPaths)
 ;_ArrayDisplay($readLog)
 
@@ -242,7 +242,7 @@ local $Logfile1 = ""	;$filelist[0][2]
 local $Logfile2 = ""	;$filelist[1][2]
 local $Logfile3 = ""	;$filelist[2][2]
 
-;Read variables from help functions
+;Read return values to variables from help functions
 _ASC_array($aASC, $TrayID)
 _TPL_array($aTPL, $TPL_ID, $TrayID)
 _EvoLogfiles($Date , $Time , $Username , $Logfile1 , $Logfile2 , $Logfile3)
@@ -272,28 +272,48 @@ $Header = "A;MagellanMethod;" & $aASC[$aASC[0]] & ";"
 FileWriteline($TPLASC, $Header & _HFchecksum($Header) & @CRLF)
 $Header = ""
 
+;_ArrayDisplay($aASC)
+
 		 _ArrayDelete($aTPL, $aTPL[0])											;TPL array adjusted to read in loop
 		 _ArrayDelete($aTPL, 1)
 		 _ArrayDelete($aTPL, 0)
-
 		 _ArrayDelete($aASC, $aASC[0])											;ASC array adjusted to read in loop
-		 _ArrayDelete($aASC, 0)
-;_ArrayDisplay($aASC)
-		 _ArraySort($aTPL, 0, 0, 0, 0, 1)											; array is sorted alphabetically
-		 _ArraySort($aASC, 0, 0, 0, 0, 1)
+		; get MTP positions from $aASC
 
-;_ArrayDisplay($aTPL)
-;_ArrayDisplay($aASC)
+		Global $aASCpos[96]
+		;msgbox(4096,"",$aASC[0] & " " & $AscCount)
+		For $i = 1 to $aASC[0]-1;$AscCount	;5;$aASC[0]
+			;msgbox(4096,"",$aASC[$i])
+			$aASCsplit = $aASC[$i]
+			$aASCsplit = stringsplit($aASC[$i],";")
+			$aASCpos[$i] = $aASCsplit[3] & ";"
+		Next
 
+		_ArrayDelete($aASC, 0)
+		;_ArraySort($aTPL, 0, 0, 0, 0, 1)											; array is sorted alphabetically
+		;_ArraySort($aASC, 0, 0, 0, 0, 1)
+		;_ArraySort($aASCpos, 0, 0, 0, 0, 1)
+
+_ArrayDisplay($aASC)
+;_ArrayDisplay($aASCsplit)
+
+_arraydelete($aASCpos,0)
+_arraydisplay($aASCpos)
+
+_ArrayDisplay($aTPL)
+_ArrayDisplay($aASC)
 ;for $ASCline = 0 to ubound($aTPL)-1
+
 for $TPLine = 0 to ubound($aTPL)-1
 
 	  ;$MTPpos = stringinstr($aASC[$ASCLine], ";", 0, 2) +1						; position of MTP well number is always found 1 Chr to the right of the 2nd  ";" in the ASClinenumber
 	  $MTPpos = stringinstr($aTPL[$TPLine], ";", 0,3)+1
-	  $Well = stringmid($aTPL[$TPLine],$MTPpos, 3)
-	  ;$Well = stringmid($aASC[$ASCLine],$MTPpos, 3)								; $Well is the MTP position: 3 characters read from the ASC line at $MTPpos
+	  $Well = stringmid($aTPL[$TPLine],$MTPpos, 3)								; $Well is the MTP position: 3 characters read from the TPL line at $MTPpos
+	  ;$Well = stringmid($aASC[$ASCLine],$MTPpos, 3)
 
-	  $ASCLine = _ArraySearch($aASC, $Well,0,0,0,1,1)							; the TPL file line number at which the same MTP position is found as in the ASC file
+	  ;$aASCpos = stringsplit($aASC[$TPLline],";")
+	 ; _arraydisplay($aASCpos)
+	  $ASCLine = _ArraySearch($aASCpos, $Well,0,0,0,1,3,False)							; the ASC file line number at which the same MTP position is found as in the TPL file
 
 	  $aASCSamLen= stringinstr($aASC[$ASCLine], ";", 0, 1) -1					; length of samplename in ASC-file ; samplename is always found in front of 1st ";" in ASCline file
 	  $TPLSamPos = stringinstr($aTPL[$TPLine], ";", 0, 2) +1					; position of samplename in TPL file with linenumber corresponding to same samplename in Ascifile line
@@ -304,7 +324,9 @@ for $TPLine = 0 to ubound($aTPL)-1
 	  $TPLwrite = StringStripWS($aTPL[$TPLine],2)
 	  $ASCwrite = StringStripWS($aASC[$ASCLine],1)
 
-	  Select
+; msgbox(4096,"",$MTPpos & " " & $Well & " " & $TPLine& " " & $ASCLine & " " & $aASCSamLen & " " & $TPLSamPos & @CRLF & $aASCSample & " " & $TPLSample & " " & $TPLwrite & " " & $ASCwrite)
+
+	 Select
 		Case $aASCSample = $TPLSample											; determines whether the ASC samplename is the same as the TPL samplename and if so:
 
 			FileWriteline($TPLASC, $TPLwrite & $ASCwrite & _Checksum($TPLwrite, $ASCwrite) & @CRLF) 	; write the matching TPL and ASC data to the TPLASC file
@@ -340,11 +362,11 @@ Select
    Case $ZipToAr = 1
 	  _ZipToArchive($TrayID)
    Case $ZipToAr = 0
-	  msgbox(4096, "TPLASC.exe message","TPL and ASC files are not zipped to archive" & @CRLF & "check and edit C:\Apps\EVO\TPLASC\TPLASC.ini file", 3)
+	  msgbox(4096, "TPLASC.exe message","TPL and ASC files are not zipped to archive" & @CRLF & "check and edit @scriptdir &\TPLASC.ini file", 3)
    Case Else
-	  msgbox(4096, "TPLASC.exe message","C:\Apps\EVO\TPLASC\TPLASC.ini file is corrupted" & @CRLF _
-	  & "TPLASC.exe message","TPL and ASC files are not zipped to archive" & @CRLF & "C:\Apps\EVO\TPLASC\TPLASC.ini file will be reset to default", 3)
-	  FileDelete("C:\Apps\EVO\tplasc\TPLASC.ini")
+	  msgbox(4096, "TPLASC.exe message","@scriptdir &\TPLASC.ini file is corrupted" & @CRLF _
+	  & "TPLASC.exe message","TPL and ASC files are not zipped to archive" & @CRLF & "@scriptdir &\TPLASC.ini file will be reset to default", 3)
+	  FileDelete(@scriptdir & "\TPLASC.ini")
 EndSelect
 
 fileclose($TPLASCPath & $TrayID & ".evo")
@@ -489,6 +511,7 @@ If stringleft($aTPL[1],2)<> "H;" then
 
 ; change 'D' to 'R' in $aTPL array
 For $j = 1 to ubound($aTPL)-1
+
 	 $aTPL[$j] = StringStripWS($aTPL[$j], $STR_STRIPLEADING + $STR_STRIPTRAILING)
 	Local $DtoR
 	If StringLeft ( $aTPL[$j], 1 ) = "D" Then
@@ -533,8 +556,10 @@ Dim $arLOG
 Dim $filelist[3][3]
 local $TrcTxt
 
+		$TrcTxt = "C:\ProgramData\Tecan\Evoware\AuditTrail\log\trace.txt"
+
 Select	; determine Windows OS version to select path of Evoware Trace.txt
-   Case $Windows = "WIN_7" ;OR "WIN_8" OR "WIN_7" OR "WIN_VISTA"
+   Case $Windows = "WIN_10" OR "WIN_81" OR "WIN_8" OR "WIN_7"
 		 $TrcTxt = "C:\ProgramData\Tecan\Evoware\AuditTrail\log\trace.txt"
 		 If @error then
 		 If $LOGFILE = 1 Then _SendAndLog("C:\ProgramData\Tecan\Evoware\AuditTrail\log\trace.txt not found, script aborted", $Logname, True)
