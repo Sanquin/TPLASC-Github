@@ -1,9 +1,9 @@
 ; **************************************************************************************************************************************
 ;
-; TPLASC version 0.30 Dion Methorst & Ed Nieuwenhuys, Sanquin Amsterdam, November 2015
+; Sanquin CAP laboratory TPLASC for Tecan EVO general ELISA and C1-inhibitor assays
 ;
-; Sanquin CAP laboratory TPLASC is used for Tecan EVO general ELISA and C1-inhibitor assays
-; TPLASC concatenates Tecan EVO TPL and ASC files for direct use in LIMS database
+; TPLASC version 0.30 Dion Methorst & Ed Nieuwenhuys, Sanquin Amsterdam, November 2017
+; concatenates your Tecan EVO TPL and ASC files for direct use in LIMS database
 ;
 ; **************************************************************************************************************************************
 ;
@@ -54,7 +54,7 @@
 ; V0.22		Strip whitespace from TPL file, to identify the 'L' liquid error flag
 ;			Added column for liquid error input ";L;"
 ; December 2014
-; V0.23		r304-314: Move TrayID.tpl and TrayID.ASC to Zipped Archive and delete original TPL & ASC-files
+; V0.23		Move TrayID.tpl and TrayID.ASC to Zipped Archive and delete original TPL & ASC-files
 ; April through June2015
 ; V0.24		added ini file section for easy adaptation of filepaths (builtin reset to default upon deletion)
 ; V0.25		fixed failure extracting correct logfiles from trace.txt in Tecan audittrail
@@ -62,14 +62,15 @@
 ; V0.26		added toggle for Zip function in ini-file
 ; V0.27		disabled readonly property of TrayID.TPL file Zipfunction: FileSetAttrib($TPLPath & $TrayID & ".tpl", "-R+A", 1)
 ; 			better sorting of $ASC array
-; V0.28		Swap SampleID comparison array: Use $aTPL as leading array instead of $aASC: see main loop in Func _TPLASC_concatenator(): approx. at line 287
+; V0.28		Swap SampleID comparison array: Use $aTPL as leading array instead of $aASC: see main loop in Func _TPLASC_concatenator()
 ;			This change allows use of TPLASC for both ELISA and C1inh assays
 ; V0.29		Moved TPLASC.ini location to @scriptdir
 ;			Adapted for Windows 10
-; March 2017
-; V0.30		Fix for faulty lookup of TPL MTP position in ASC array when the last part of the SampleID is similar to the MTP position searchstring.
-;			(For example when TPL MTP_WELLPOSITION = B2; and the $aASC SampleID = Mab2; the wrong ASC MTP_WELLPOSITION was retrieved,
-;			subsequently SampleID's from TPL and ASC did not match and were not written to TPLASC.)
+; November 2017
+; V0.30		Add E/min to ASC file
+;			Disabled option to disable ZipFilesArchive as it convolutes & interferes with archiving of files
+;			Updated errorhandling and logging to logfile
+;
 ;
 ; ************************************************************************************************************************************
 ;
@@ -83,6 +84,8 @@
 ;						  ASC file dataformat must be as follows:
 ;
 ;						   Any Line 					SAMPLENAME;ASBORBANCE;MTP_WELLPOSITION;OK;
+;						   OR
+;						   Any Line						SAMPLENAME;ASBORBANCE;ASBORBANCE;ASBORBANCE;ASBORBANCE;MTP_WELLPOSITION;OK;
 ;						   Last Line					MagellanMethodName.mth
 ;
 ;
@@ -134,6 +137,9 @@
 ;	Func _HFchecksum($Header)
 ;	- checksum for header and footer lines through $Header and $Footer
 ;
+;	Func _Emin_Asc(ByRef $aASC, ByRef $TrayID)
+;	- adds E/min calculation to Asc-file for C1inh assays only
+;
 ; **************************************************************************************************************************************
 ;
 ; Start of script
@@ -156,11 +162,10 @@
 If not FileExists(@scriptdir & "\TPLASC.ini") then
 	Local $iniPath = "AscPath=C:\Apps\EVO\asc\" & @LF & "TplPath=C:\Apps\EVO\tpl\" & @LF & "TPLASCpath=C:\Apps\EVO\tplasc\" _
 	& @LF & "LogfilePath=C:\Apps\EVO\tplasc\" & @LF & "ArchivePath=C:\apps\EVO\Archief\"& @LF
-    Local $iniLog = "Logfile=1" & @LF & "Logfilename=TPLSASClog.log" & @LF & "Max_lines=500" & @LF & "ZipFileToArchive=1"
+    Local $iniLog = "Logfile=1" & @LF & "Logfilename=TPLSASClog.log" & @LF & "Max_lines=500" & @LF		;& "ZipFileToArchive=1"
 	IniWriteSection(@scriptdir & "\TPLASC.ini", "Paths", $iniPath)
 	IniWriteSection(@scriptdir & "\TPLASC.ini", "Log", $iniLog)
 	Endif
-
 $readPaths = IniReadSection(@scriptdir & "\TPLASC.ini", "Paths")
 $readLog = IniReadSection(@scriptdir & "\TPLASC.ini", "Log")
 ;_ArrayDisplay($readPaths)
@@ -169,11 +174,11 @@ $readLog = IniReadSection(@scriptdir & "\TPLASC.ini", "Log")
 ; Defined variables
 Dim Const $LOGFILE = $readLog[1][1] 				; = 1									; logfile will be created when $logfile = 1
 Dim Const $MAX = $readLog[3][1]						; =500 									; max number of lines in logfile
-Dim Const $ZipToAr = $readlog[4][1]					; Zips ASC and TPL files to archive if ZipFileToArchive entry is set to YES
+Dim Const $ZipToAr = 1								; Zips ASC and TPL files to archive if ZipFileToArchive entry is set to YES		 ;User Input replace with: $readlog[4][1]
 Global $ASCPath = $readPaths[1][1]					;"C:\apps\EVO\asc\"						; ASC file path
 Global $TPLPath = $readPaths[2][1]					;"C:\apps\EVO\TPL\"						; TPL file pathfilename extracted from ASC file: MBL110File created: C:\apps\EVO\TPLASC\MBL110.evo
 Global $TPLASCPath = $readPaths[3][1]				; "C:\apps\EVO\TPLASC\"					; path of TPLASC *.evo files
-Global $Logname = $readPaths[4][1] & $readLog[2][1] ;$TPLASCPath &"TPLSASClog.log"				; path & name of TPLASC logfile
+Global $Logname = $readPaths[4][1] & $readLog[2][1] ;$TPLASCPath &"TPLSASClog.log"			; path & name of TPLASC logfile
 Global $ArchPath = $readPaths[5][1] 				;"C:\apps\EVO\Archief\"	; Archive path for copied ASC files
 
 ;local $TrcTxt = "C:\ProgramData\Tecan\Evoware\AuditTrail\log\Trace.txt" ;=Win7/8/9,
@@ -222,15 +227,12 @@ Global $ArchPath = $readPaths[5][1] 				;"C:\apps\EVO\Archief\"	; Archive path f
 ;<---------------------------------------------------------------------------------------------------------------------------------------
 ;<---------------------------------------------------------------------------------------------------------------------------------------
 Func _Main()
-
 _TPLASC_concatenator()
 _ClearLogFile()
-
 EndFunc
 ;<---------------------------------------------------------------------------------------------------------------------------------------
 ;<---------------------------------------------------------------------------------------------------------------------------------------
 Func _TPLASC_concatenator()
-
 local $aTPL = ""
 local $aASC = ""
 local $TrayID = ""		;stringtrimright($aASCsearch2D[1][0],4)
@@ -253,7 +255,6 @@ If $TPL_ID<>$TrayID then
  MsgBox(4096, "Error Log", "TPL & ASC files don't match" & @CRLF)
  Exit
 EndIf
-
 local $TPLASC = fileopen($TPLASCPath & $TrayID & ".evo", 2 +8)
 ; write header lines & checksum		CLIS (Sanquin LIMS) commitments
 ; 									H;1DD-MM-YY;hh:mm:ss
@@ -271,64 +272,36 @@ $Header = "A;MagellanMethod;" & $aASC[$aASC[0]] & ";"
 ;[$aASC[0]]is the number of lines in the array; here used to read data ;from the last line of the array i.e. :  $ASC[$aASC[0]
 FileWriteline($TPLASC, $Header & _HFchecksum($Header) & @CRLF)
 $Header = ""
-
-;_ArrayDisplay($aASC)
-
 		 _ArrayDelete($aTPL, $aTPL[0])											;TPL array adjusted to read in loop
 		 _ArrayDelete($aTPL, 1)
 		 _ArrayDelete($aTPL, 0)
 		 _ArrayDelete($aASC, $aASC[0])											;ASC array adjusted to read in loop
-		; get MTP positions from $aASC
-
-		Global $aASCpos[96]
-		;msgbox(4096,"",$aASC[0] & " " & $AscCount)
-		For $i = 1 to $aASC[0]-1;$AscCount	;5;$aASC[0]
-			;msgbox(4096,"",$aASC[$i])
-			$aASCsplit = $aASC[$i]
-			$aASCsplit = stringsplit($aASC[$i],";")
-			$aASCpos[$i] = $aASCsplit[3] & ";"
-		Next
-
-		_ArrayDelete($aASC, 0)
-		;_ArraySort($aTPL, 0, 0, 0, 0, 1)											; array is sorted alphabetically
+		 _ArrayDelete($aASC, 0)
+		;_ArrayDisplay($aASC)
+		 _ArraySort($aTPL, 0, 0, 0, 0, 1)											; array is sorted alphabetically
 		;_ArraySort($aASC, 0, 0, 0, 0, 1)
-		;_ArraySort($aASCpos, 0, 0, 0, 0, 1)
 
-_ArrayDisplay($aASC)
-;_ArrayDisplay($aASCsplit)
+;_ArrayDisplay($aTPL)
+;_ArrayDisplay($aASC)
 
-_arraydelete($aASCpos,0)
-_arraydisplay($aASCpos)
-
-_ArrayDisplay($aTPL)
-_ArrayDisplay($aASC)
 ;for $ASCline = 0 to ubound($aTPL)-1
-
 for $TPLine = 0 to ubound($aTPL)-1
 
 	  ;$MTPpos = stringinstr($aASC[$ASCLine], ";", 0, 2) +1						; position of MTP well number is always found 1 Chr to the right of the 2nd  ";" in the ASClinenumber
 	  $MTPpos = stringinstr($aTPL[$TPLine], ";", 0,3)+1
 	  $Well = stringmid($aTPL[$TPLine],$MTPpos, 3)								; $Well is the MTP position: 3 characters read from the TPL line at $MTPpos
 	  ;$Well = stringmid($aASC[$ASCLine],$MTPpos, 3)
-
-	  ;$aASCpos = stringsplit($aASC[$TPLline],";")
-
-	  $ASCLine = _ArraySearch($aASCpos, $Well,0,0,0,1,3,False)							; the ASC file line number at which the same MTP position is found as in the TPL file
-
+	  $ASCLine = _ArraySearch($aASC, $Well,0,0,0,1,3,False)							; the ASC file line number at which the same MTP position is found as in the TPL file
 	  $aASCSamLen= stringinstr($aASC[$ASCLine], ";", 0, 1) -1					; length of samplename in ASC-file ; samplename is always found in front of 1st ";" in ASCline file
 	  $TPLSamPos = stringinstr($aTPL[$TPLine], ";", 0, 2) +1					; position of samplename in TPL file with linenumber corresponding to same samplename in Ascifile line
-
 	  $aASCSample = stringleft($aASC[$ASCLine], $aASCSamLen)  					; Samplename from ASCline (number of the loop)
 	  $TPLSample = stringmid($aTPL[$TPLine], $TPLSampos, $aASCSamLen)			; Samplename from the TPLfile linenumber with the same MTP position ($Well) as the ASCfile linenumber (in the loop)
-
 	  $TPLwrite = StringStripWS($aTPL[$TPLine],2)
 	  $ASCwrite = StringStripWS($aASC[$ASCLine],1)
 
 ; msgbox(4096,"",$MTPpos & " " & $Well & " " & $TPLine& " " & $ASCLine & " " & $aASCSamLen & " " & $TPLSamPos & @CRLF & $aASCSample & " " & $TPLSample & " " & $TPLwrite & " " & $ASCwrite)
-
 	 Select
 		Case $aASCSample = $TPLSample											; determines whether the ASC samplename is the same as the TPL samplename and if so:
-
 			FileWriteline($TPLASC, $TPLwrite & $ASCwrite & _Checksum($TPLwrite, $ASCwrite) & @CRLF) 	; write the matching TPL and ASC data to the TPLASC file
 																										; format: R;LIMS_ID;SAMPLENAME;MTP_WELLPOSITION;checksum
 	    Case $aASCSample <> $TPLSample																	; if samplenames are not exactly the same a message pops up: check the line numbers int he ASC and
@@ -352,12 +325,21 @@ FileWriteline($TPLASC, $Footer & _HFchecksum($Footer)& @CRLF)
 $Footer = "L;"
 FileWriteline($TPLASC, $Footer & _HFchecksum($Footer)& @CRLF)
 $Footer = ""
-
 If $LOGFILE = 1 Then _SendAndLog("Logfile1: " & $Logfile1 , $Logname, True)
 If $LOGFILE = 1 Then _SendAndLog("Logfile2: " & $Logfile2 , $Logname, True)
 If $LOGFILE = 1 Then _SendAndLog("Logfile3: " & $Logfile3 & ";" & ".evo", $Logname, True)
 If $LOGFILE = 1 Then _SendAndLog("File created: " & $TPLASCPath & $TrayID & ".evo", $Logname, True)
 
+; append E/min to ASC file before it is zipped to archive
+; Select case to restrict execution only for C1inh assays
+Select
+	Case StringLeft($TrayID,5) = "c1est"
+		_Emin_Asc($aASC, $TrayID)
+	Case StringLeft($TrayID,5) = "c1inh"
+		_Emin_Asc($aASC, $TrayID)
+EndSelect
+
+; Zip TPL & ASC files to archive, or not...
 Select
    Case $ZipToAr = 1
 	  _ZipToArchive($TrayID)
@@ -368,19 +350,15 @@ Select
 	  & "TPLASC.exe message","TPL and ASC files are not zipped to archive" & @CRLF & "@scriptdir &\TPLASC.ini file will be reset to default", 3)
 	  FileDelete(@scriptdir & "\TPLASC.ini")
 EndSelect
-
 fileclose($TPLASCPath & $TrayID & ".evo")
 fileclose($ASCPath & $TrayID & ".asc")
 fileclose($TPLPath & $TrayID & ".tpl")
-
 EndFunc ;_TPLASC_concatenator()
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Func _ZipToArchive($TrayID);ByRef $ArchPath, ByRef $TPLPath,
-
 If not fileexists($ArchPath & "TPLzip.zip") then _Zip_Create($ArchPath & "TPLzip.zip",0)
 If not fileexists($ArchPath & "ASCzip.zip") then _Zip_Create($ArchPath & "ASCzip.zip",0)
-
 FileSetAttrib($TPLPath & $TrayID & ".tpl", "-R+A", 1)
 If Not FileSetAttrib($TPLPath & $TrayID & ".tpl", "-R+A", 1) Then
         MsgBox($MB_SYSTEMMODAL, "Error", "Problem setting TPL-fie attributes.",3)
@@ -389,21 +367,21 @@ FileSetAttrib($ASCPath & $TrayID & ".asc", "-R+A", 1)
 If Not FileSetAttrib($ASCPath & $TrayID & ".asc", "-R+A", 1) Then
         MsgBox($MB_SYSTEMMODAL, "Error", "Problem setting ASC-file attributes.",3)
     EndIf
-
 _Zip_AddItem($ArchPath & "TPLzip.zip", $TPLPath & $TrayID & ".tpl" , ""  , 21)
 _Zip_AddItem($ArchPath & "ASCzip.zip" , $ASCPath & $TrayID & ".asc" ,  "" , 21)
-
+If @error = 0 then
 	Select
 		Case FileExists($ArchPath & "ASCzip.zip")
-			_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl added to" & $Archpath & "ASCzip & TPLzip archives.", $Logname, True)
+			_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl copied to " & $Archpath & "ASCzip & TPLzip archives.", $Logname, True)
 			filedelete($ASCPath & $TrayID & ".asc")
 			filedelete($TPLPath & $TrayID & ".tpl")
-			_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl deleted from their directories.", $Logname, True)
+			_SendAndLog("The original " & $TrayID & ".asc & " & $TrayID & ".tpl were deleted after copying to TPLzip archives.", $Logname, True)
 		Case Not FileExists($ArchPath & "TPLzip.zip")
 			_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl NOT added to" & $Archpath & "ASCzip & TPLzip archives.", $Logname, True)
 			_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl NOT deleted from their directories.", $Logname, True)
 			_SendAndLog("Something went wrong. Check your assay: Joblist OK? Barcodes OK?", $Logname, True)
-		 EndSelect
+	EndSelect
+EndIf
 
 EndFunc ; _ZipToArchive
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -412,7 +390,6 @@ Func  _ASC_array(ByRef $aASC, ByRef $TrayID)
 
 ; Retrieve ASC File for concatenation with TPL file
 ; Global $ASCPath = "C:\apps\EVO\asc\"
-
 $checkASC = StringRegExp($ASCPath,"^.+\\$",0)
 	  If $checkASC = 0 Then $ASCPath = $ASCPath & "\"
 		 If @error = -1 Then
@@ -421,7 +398,6 @@ $checkASC = StringRegExp($ASCPath,"^.+\\$",0)
 			"    ! Script aborted !")
 		 Exit
 	  EndIf
-
 $aASCsearch = _FileListToArray($ASCPath,"*.Asc",1)
 	  If Not IsArray($aASCsearch) Then
 		 If $LOGFILE = 1 Then _SendAndLog($ASCPath & " has no *.ASC files", $Logname, True)
@@ -429,16 +405,13 @@ $aASCsearch = _FileListToArray($ASCPath,"*.Asc",1)
 			"   ! Script aborted !")
 		 Exit
 	  EndIf
-
 Global $aASCsearch2D[10][2]
 ReDim $aASCsearch2D[$aASCsearch[0]+1][2]
 $aASCsearch2D[0][0] = $aASCsearch[0]
-
 For $i=1 to $aASCsearch[0]
     $aASCsearch2D[$i][0] = $aASCsearch[$i]
     $aASCsearch2D[$i][1] = FileGetTime($ASCPath & $aASCsearch[$i],0,1)
 Next
-
 _ArraySort($aASCsearch2D,1,1,"",1)
 _FileReadToArray($ASCPath & $aASCsearch2D[1][0], $aASC)
 
@@ -449,18 +422,70 @@ $TrayID = stringtrimright($aASCsearch2D[1][0],4)
 		 MsgBox(4096, "Error Log", "TrayID format incorrect" & @CRLF)
 		 Exit
 	  EndIf
-
 If $LOGFILE = 1 Then _SendAndLog("ASC file extracted from C:\apps\EVO\ASC folder: " & $aASCsearch2D[1][0] & ";file date & time of creation: " & $aASCsearch2D[1][1], $Logname, True)
 
 ;_ArrayDisplay($aASC)
 EndFunc ; _ASC_array()
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Func _Emin_Asc(ByRef $aASC, ByRef $TrayID)
+
+; calculate E/min for C1inh assays for emergency procedure when LIMS is offline
+; Retrieve ASC File for concatenation with TPL file
+; Global $ASCPath = "C:\apps\EVO\asc\" (by default)
+$checkASC = StringRegExp($ASCPath,"^.+\\$",0)
+	  If $checkASC = 0 Then $ASCPath = $ASCPath & "\"
+		 If @error = -1 Then
+			If $LOGFILE = 1 Then _SendAndLog($ASCPath & " has no *.ASC files", $Logname, True)
+			Msgbox(0,"Error Log", "   " & $ASCPath & " has no files" & @CRLF & @CRLF & _
+			"    ! Script aborted !")
+		 Exit
+	  EndIf
+$aASCsearch = _FileListToArray($ASCPath,"*.Asc",1)
+	  If Not IsArray($aASCsearch) Then
+		 If $LOGFILE = 1 Then _SendAndLog($ASCPath & " has no *.ASC files", $Logname, True)
+			Msgbox(0,"Error Log", "   " & $ASCPath & " has no files" & @CRLF & @CRLF & _
+			"   ! Script aborted !")
+		 Exit
+	  EndIf
+Global $aASCsearch2D[10][2]
+ReDim $aASCsearch2D[$aASCsearch[0]+1][2]
+$aASCsearch2D[0][0] = $aASCsearch[0]
+For $i=1 to $aASCsearch[0]
+    $aASCsearch2D[$i][0] = $aASCsearch[$i]
+    $aASCsearch2D[$i][1] = FileGetTime($ASCPath & $aASCsearch[$i],0,1)
+Next
+_ArraySort($aASCsearch2D,1,1,"",1)
+_FileReadToArray($ASCPath & $aASCsearch2D[1][0], $aASC)
+
+; Retrieve TrayID = ASC filename
+$TrayID = stringtrimright($aASCsearch2D[1][0],4)
+
+; Add E/min to ASC file!
+For $i=1 to $aASC[0]-1
+    $aEmin = Stringsplit($aASC[$i],";")
+	;_ArrayDisplay($aEmin)
+	If $aEmin[0]=8 then													; size of array is only 8 for C1inh assays so calculation of E/min is skipped if otherwise!
+		global $strEmin
+		$Round = Round(($aEmin[5]-$aEmin[2])/3, 5)*1000
+		$RoundFormat = StringFormat ("%.2f",$Round )
+		$strEmin = $aEmin[1] & "; E/min = " & $Roundformat & ";"		; $aEmin[1] = SampleID ;msgbox(4096,"E/min", $strEmin)
+		$aASC[$i] = $strEmin
+		FileWrite($ASCPath & $TrayID & ".asc", $aASC[$i] & @CRLF)
+	EndIf
+Next
+
+If $LOGFILE = 1 Then _SendAndLog("C1inh assay E/Min data added to ASC file. File date & time of creation: " & $aASCsearch2D[1][1], $Logname, True)
+
+FileClose($ASCPath & $TrayID & ".asc")
+;_ArrayDisplay($aASC)
+EndFunc ; _Emin_Asc()
+;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Func _TPL_array(ByRef $aTPL, ByRef $TPL_ID, $TrayID)
 
 ; Retrieve TPL File for concatenation with ASC file
 ; Global $TPLPath = "C:\apps\EVO\TPL\"
-
 $checkTPL = StringRegExp($TPLPath,"^.+\\$",0)
 	  If $checkTPL = 0 Then $TPLath = $TPLPath & "\"
 		 If @error = -1 then
@@ -469,7 +494,6 @@ $checkTPL = StringRegExp($TPLPath,"^.+\\$",0)
 			If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
 			Exit
 		 EndIf
-
 $aTPLsearch = _FileListToArray($TPLPath,"*.TPL",1)
 	  If Not IsArray($aTPLsearch) Then
 		  Msgbox(0,"Error Log", $TPLPath & " has no files" & @CRLF & @CRLF & _
@@ -477,16 +501,13 @@ $aTPLsearch = _FileListToArray($TPLPath,"*.TPL",1)
 			If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
 		  Exit
 	  EndIf
-
 Global $aTPLsearch2D[10][2]
 ReDim $aTPLsearch2D[$aTPLsearch[0]+1][2]
 $aTPLsearch2D[0][0] = $aTPLsearch[0]
-
 For $i=1 to $aTPLsearch[0]
     $aTPLsearch2D[$i][0] = $aTPLsearch[$i]
     $aTPLsearch2D[$i][1] = FileGetTime($TPLPath & $aTPLsearch[$i],0,1)
 Next
-
 _ArraySort($aTPLsearch2D,1,1,"",1)
 ; original sort array on filetime and choose the newest/latest file for comparison with
 ;_FileReadToArray($TPLPath & $aTPLsearch2D[1][0], $aTPL))
@@ -498,9 +519,7 @@ If @error then
 		  "! script aborted !")
 	  Exit
 EndIf
-
 _FileReadToArray($TPLPath & $aTPLsearch2D[$aIndex][0] , $aTPL)
-
 If stringleft($aTPL[1],2)<> "H;" then
 	  MsgBox(4096, "Error Log", "Array index incorrect, " & @CRLF & _
 		 $TrayID & ".tpl :first line in file does not contain H; date & time header" & @CRLF & @CRLF & _
@@ -511,7 +530,6 @@ If stringleft($aTPL[1],2)<> "H;" then
 
 ; change 'D' to 'R' in $aTPL array
 For $j = 1 to ubound($aTPL)-1
-
 	 $aTPL[$j] = StringStripWS($aTPL[$j], $STR_STRIPLEADING + $STR_STRIPTRAILING)
 	Local $DtoR
 	If StringLeft ( $aTPL[$j], 1 ) = "D" Then
@@ -527,7 +545,6 @@ For $j = 1 to ubound($aTPL)-1
 		$L = stringreplace($aTPL[$j], ";", ";;", -1, 0)
 		$aTPL[$j] = $L
 	EndIf
-
 Next
 
 ; Retrieve TPL filename ID
@@ -537,7 +554,6 @@ Next
 		 MsgBox(4096, "Error Log", "TPL_ID format incorrect" & @CRLF)
 		 Exit
 	  EndIf
-
 If $LOGFILE = 1 Then _SendAndLog("TPL filename from ASC file TrayID comparison: " & $aTPLsearch2D[$aIndex][0], $Logname, True)	; write TPL filename to logfile
 ; filemanagement for future use:
 ;_ArrayDisplay($aTPL)
@@ -550,17 +566,15 @@ Func _EvoLogfiles(ByRef $Date , ByRef $Time , ByRef $Username , ByRef $Logfile1 
 ; 2014.09.22 08:56:04  twin			C:\Program Files\TECAN\EVOware\Audittrail\Log\EVO_20140922_085604.LOG
 ; 2014.09.22 08:56:05  twin			C:\Program Files\TECAN\EVOware\Audittrail\Log\USR_20140922_085604.LOG
 ; 2014.09.22 08:56:05  twin			C:\Program Files\TECAN\EVOware\Audittrail\Log\ERR_20140922_085604.LOG
-
 local $Windows = @OSVersion
 Dim $arLOG
 Dim $filelist[3][3]
 local $TrcTxt
-
 		$TrcTxt = "C:\ProgramData\Tecan\Evoware\AuditTrail\log\trace.txt"
-
 Select	; determine Windows OS version to select path of Evoware Trace.txt
    Case $Windows = "WIN_10" OR "WIN_81" OR "WIN_8" OR "WIN_7"
 		 $TrcTxt = "C:\ProgramData\Tecan\Evoware\AuditTrail\log\trace.txt"
+					;C:\ProgramData\Tecan\Evoware\Auditrail\log
 		 If @error then
 		 If $LOGFILE = 1 Then _SendAndLog("C:\ProgramData\Tecan\Evoware\AuditTrail\log\trace.txt not found, script aborted", $Logname, True)
 			 MsgBox(4096, "Error Log", "Array index incorrect, " & @CRLF & _
@@ -588,7 +602,6 @@ local $arCount = $arLOG[0]
 ; delete all non-.log files from array...
 local $i = 0
 For $h = $TrcTxtCount to 1 step -1
-
    If Stringright($arLOG[$h], 4) = ".log" then
 	   ; Split the first found LOG file entry from $arLOG to $Logfile array
 	   local $Logfile = StringSplit ( stringreplace($arLOG[$h], "  ", ";"), ";", 1)
@@ -605,7 +618,6 @@ For $h = $TrcTxtCount to 1 step -1
 	  MsgBox($MB_SYSTEMMODAL, "Error", "Error reading trace.txt")
 	  Exit
    EndIf
-
    $TrcTxtCount = $TrcTxtCount-1
    If $i = 3 then ExitLoop
    Next
@@ -618,7 +630,6 @@ $Username = $filelist[0][1]
 $Logfile1 = $filelist[0][2]
 $Logfile2 = $filelist[1][2]
 $Logfile3 = $filelist[2][2]
-
 EndFunc ;_EvoLogfiles()
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -626,32 +637,31 @@ Func _SendAndLog($Logdata, $Filename = -1, $TimeStamp = False)
 
 ;line		log
 ;	252		If $LOGFILE = 1 Then _SendAndLog($TrayID & "TPL & ASC files don't match, check fileame and date", $Logname, True)
-;	335		If $LOGFILE = 1 Then _SendAndLog($aASCSample & " & " _
+;	313		If $LOGFILE = 1 Then _SendAndLog($aASCSample & " & " _
 ;			& $TPLSample & " do not match." & @CRLF _
 ;			& "check TPL filelinenumber " & $TPLine & @CRLF _
 ;			& "check ASC filelinenumber " & $ASCLine, $Logname, True)		; writes not matching linenumbers to logfile ASC en TPL linenumbers
-;	356 	If $LOGFILE = 1 Then _SendAndLog("Logfile1: " & $Logfile1 , $Logname, True)
-;	357		If $LOGFILE = 1 Then _SendAndLog("Logfile2: " & $Logfile2 , $Logname, True)
-;	358		If $LOGFILE = 1 Then _SendAndLog("Logfile3: " & $Logfile3 & ";" & ".evo", $Logname, True)
-;	359		If $LOGFILE = 1 Then _SendAndLog("File created: " & $TPLASCPath & $TrayID & ".evo", $Logname, True)
-;	398		_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl added to" & $Archpath & "ASCzip & TPLzip archives.", $Logname, True)
-;	402		_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl deleted from their directories.", $Logname, True)
-;	403		_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl NOT added to" & $Archpath & "ASCzip & TPLzip archives.", $Logname, True)
-;	404		_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl NOT deleted from their directories.", $Logname, True)
-;	405		_SendAndLog("Something went wrong. Check your assay: Joblist OK? Barcodes OK?", $Logname, True)
-;	419		If $LOGFILE = 1 Then _SendAndLog($ASCPath & " has no *.ASC files", $Logname, True)
-;	427		If $LOGFILE = 1 Then _SendAndLog($ASCPath & " has no *.ASC files", $Logname, True)
-;	448		If $LOGFILE = 1 Then _SendAndLog($TrayID & "TrayID error", $Logname, True)
-;	453		If $LOGFILE = 1 Then _SendAndLog("ASC file extracted from C:\apps\EVO\ASC folder: " & $aASCsearch2D[1][0] & ";file date & time of creation: " & $aASCsearch2D[1][1], $Logname, True)
-;	469		If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
-;	477		If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
-;	495		If $LOGFILE = 1 Then _SendAndLog($TrayID & ".tpl file does not exist in TPL file folder, script aborted", $Logname, True)
-; 	508		If $LOGFILE = 1 Then _SendAndLog($TrayID & ".tpl :first line in file does not contain H; date & time header, script aborted", $Logname, True)
-;	536		If $LOGFILE = 1 Then _SendAndLog($TPL_ID & "TPL_ID error", $Logname, True)
-;	541		If $LOGFILE = 1 Then _SendAndLog("TPL filename from ASC file TrayID comparison: " & $aTPLsearch2D[$aIndex][0], $Logname, True)
-;	565		If $LOGFILE = 1 Then _SendAndLog("C:\ProgramData\Tecan\Evoware\AuditTrail\log\trace.txt not found, script aborted", $Logname, True)
-;	574		If $LOGFILE = 1 Then _SendAndLog("C:\Program Files\Tecan\Evoware\AuditTrail\log\trace.txt not found, script aborted", $Logname, True)
-
+;	334 	If $LOGFILE = 1 Then _SendAndLog("Logfile1: " & $Logfile1 , $Logname, True)
+;	335		If $LOGFILE = 1 Then _SendAndLog("Logfile2: " & $Logfile2 , $Logname, True)
+;	336		If $LOGFILE = 1 Then _SendAndLog("Logfile3: " & $Logfile3 & ";" & ".evo", $Logname, True)
+;	337		If $LOGFILE = 1 Then _SendAndLog("File created: " & $TPLASCPath & $TrayID & ".evo", $Logname, True)
+;	376		_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl added to" & $Archpath & "ASCzip & TPLzip archives.", $Logname, True)
+;	379		_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl deleted from their directories.", $Logname, True)
+;	381		_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl NOT added to" & $Archpath & "ASCzip & TPLzip archives.", $Logname, True)
+;	382		_SendAndLog($TrayID & ".asc & " & $TrayID & ".tpl NOT deleted from their directories.", $Logname, True)
+;	383		_SendAndLog("Something went wrong. Check your assay: Joblist OK? Barcodes OK?", $Logname, True)
+;	397		If $LOGFILE = 1 Then _SendAndLog($ASCPath & " has no *.ASC files", $Logname, True)
+;	405		If $LOGFILE = 1 Then _SendAndLog($ASCPath & " has no *.ASC files", $Logname, True)
+;	426		If $LOGFILE = 1 Then _SendAndLog($TrayID & "TrayID error", $Logname, True)
+;	431		If $LOGFILE = 1 Then _SendAndLog("ASC file extracted from C:\apps\EVO\ASC folder: " & $aASCsearch2D[1][0] & ";file date & time of creation: " & $aASCsearch2D[1][1], $Logname, True)
+;	447		If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
+;	455		If $LOGFILE = 1 Then _SendAndLog($TPLPath & " has no *.TPL files", $Logname, True)
+;	473		If $LOGFILE = 1 Then _SendAndLog($TrayID & ".tpl file does not exist in TPL file folder, script aborted", $Logname, True)
+;	486		If $LOGFILE = 1 Then _SendAndLog($TPL_ID & "TPL_ID error", $Logname, True)
+; 	513		If $LOGFILE = 1 Then _SendAndLog($TrayID & ".tpl :first line in file does not contain H; date & time header, script aborted", $Logname, True)
+;	518		If $LOGFILE = 1 Then _SendAndLog("TPL filename from ASC file TrayID comparison: " & $aTPLsearch2D[$aIndex][0], $Logname, True)
+;	540		If $LOGFILE = 1 Then _SendAndLog("C:\ProgramData\Tecan\Evoware\AuditTrail\log\trace.txt not found, script aborted", $Logname, True)
+;	549		If $LOGFILE = 1 Then _SendAndLog("C:\Program Files\Tecan\Evoware\AuditTrail\log\trace.txt not found, script aborted", $Logname, True)
 If $Filename == -1 Then $Filename = $Logname ;$TPLASCPath &"TPLSASClog.log"
    ;Send($Logdata)
    $hFile = FileOpen($FileName, 1)
@@ -660,7 +670,6 @@ If $Filename == -1 Then $Filename = $Logname ;$TPLASCPath &"TPLSASClog.log"
         FileWriteLine($hFile, $Logdata)
         FileClose($Filename)
     EndIf
-
 EndFunc ;_SendAndLog($Logdata, $Filename = -1, $TimeStamp = False)
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -673,46 +682,35 @@ If $LOGFILE = 1	then Fileopen($Logname, 1)
 	  fileopen($logname, 2+8)
    EndIf
    Fileclose($Logname)
-
 EndFunc ;Func _ClearLogFile()
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Func _Checksum($TPLwrite, $ASCwrite)
-
 Local $count = StringToASCIIArray($TPLwrite & $ASCwrite)
-
 Local $sum
 Local $add
 Global $checksum
-
 For $k= 0 to Ubound($count)-1
 	$add = $count[$k]
 	$Sum = $add + $sum
 Next
-
 $checksum = Mod($sum, 64) +33
 return($checksum)
-
 EndFunc ;_Checksum($TPLwrite, $ASCwrite)
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Func _HFchecksum($Header)
 ;$Heder or $Footer
-
 Local $count = StringToASCIIArray($Header)
-
 Local $sum
 Local $add
 Global $checksum
-
 For $k= 0 to Ubound($count)-1
 	$add = $count[$k]
 	$Sum = $add + $sum
 Next
-
 $checksum = Mod($sum , 64) +33
 return($checksum)
-
 EndFunc ;Func _ClearLogFile()
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ;<----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
